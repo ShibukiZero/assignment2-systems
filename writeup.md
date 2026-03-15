@@ -5,14 +5,22 @@
 
 **Deliverable:** A 1-2 sentence response with your timings.
 
-**Answer:** TODO
+**Answer:** The table below reports the measured forward and backward timings for the five model sizes from Section 1.1.2 using 5 warmup steps and 10 measured steps at context length 128, batch size 4, vocabulary size 10,000, and FP32 precision. Forward and backward latency both increase with model size, while the standard deviations remain small relative to the means, indicating that the measurements are stable after warmup.
+
+| Model size | Forward mean (ms) | Forward std (ms) | Backward mean (ms) | Backward std (ms) | Total mean (ms) | Total std (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| small | 21.837 | 0.057 | 21.164 | 0.039 | 43.001 | 0.076 |
+| medium | 42.146 | 0.455 | 50.833 | 0.047 | 92.979 | 0.472 |
+| large | 62.412 | 1.055 | 117.320 | 0.288 | 179.732 | 1.074 |
+| xl | 101.257 | 0.124 | 213.640 | 0.122 | 314.898 | 0.168 |
+| 2.7b | 158.532 | 0.209 | 316.248 | 0.187 | 474.780 | 0.315 |
 
 ### (c)
 **Question:** Repeat the analysis without warmup steps. How does this affect your results? Why do you think this happens? Also try 1 or 2 warmup steps. Why might the result still be different?
 
 **Deliverable:** A 2-3 sentence response.
 
-**Answer:** TODO
+**Answer:** Removing warmup makes the measurements much noisier and substantially inflates both the means and the standard deviations, because the first measured iteration absorbs one-time startup costs such as CUDA runtime initialization, kernel loading, memory allocation, and library autotuning. For example, with `warmup=0`, the first measured `small` step took about 602 ms and the first measured `xl` step took about 905 ms, even though subsequent steps were near 42 ms and 315 ms respectively. Using 2 warmup steps already brings the results much closer to the 5-warmup baseline, but small differences can remain because not all lazy initialization and caching effects are exhausted immediately, and ordinary run-to-run system noise is still present.
 
 ---
 
