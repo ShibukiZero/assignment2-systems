@@ -31,7 +31,7 @@
 
 **Deliverable:** A 1-2 sentence response.
 
-**Answer:** TODO
+**Answer:** The total forward-pass time reported by Nsight Systems closely matches the Python benchmark results. At context length 128, the relative difference stays within about 0.7%-1.4% across all five model sizes, so the profiler confirms the earlier benchmark timings up to small profiling and measurement overheads.
 
 ### (b)
 **Question:** What CUDA kernel takes the most cumulative GPU time during the forward pass? How many times is this kernel invoked during a single forward pass of the model? Is it the same kernel that takes the most runtime when you do both forward and backward passes?

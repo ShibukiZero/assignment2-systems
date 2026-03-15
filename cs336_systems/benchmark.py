@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import statistics
 import timeit
 from contextlib import contextmanager, nullcontext
@@ -12,6 +13,7 @@ from typing import Literal
 import torch
 import torch.nn.functional as F
 
+import cs336_basics.model as basics_model_module
 from cs336_basics.model import BasicsTransformerLM
 from cs336_basics.optimizer import AdamW
 
@@ -53,6 +55,7 @@ class BenchmarkConfig:
     seed: int
     device: str
     nvtx: bool
+    attention_nvtx: bool
     output_path: str | None
 
 
@@ -102,6 +105,14 @@ def parse_args() -> BenchmarkConfig:
         help="Annotate warmup, measured iterations, and step phases with NVTX ranges.",
     )
     parser.add_argument(
+        "--attention-nvtx",
+        action="store_true",
+        help=(
+            "When NVTX is enabled, monkeypatch scaled_dot_product_attention so the trace "
+            "also marks the score matmul, softmax, and value matmul inside attention."
+        ),
+    )
+    parser.add_argument(
         "--output-path",
         type=str,
         default=None,
@@ -123,6 +134,7 @@ def parse_args() -> BenchmarkConfig:
         seed=args.seed,
         device=args.device,
         nvtx=args.nvtx,
+        attention_nvtx=args.attention_nvtx,
         output_path=args.output_path,
     )
 
@@ -189,6 +201,52 @@ def maybe_nvtx_range(label: str, enabled: bool, device: torch.device):
         yield
     finally:
         torch.cuda.nvtx.range_pop()
+
+
+@contextmanager
+def maybe_attention_nvtx_patch(config: BenchmarkConfig, device: torch.device):
+    if not (config.nvtx and config.attention_nvtx and device.type == "cuda"):
+        yield
+        return
+
+    original_attention = basics_model_module.scaled_dot_product_attention
+
+    def annotated_scaled_dot_product_attention(
+        Q: torch.Tensor,
+        K: torch.Tensor,
+        V: torch.Tensor,
+        mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        with maybe_nvtx_range("scaled_dot_product_attention", True, device):
+            d_k = K.shape[-1]
+            with maybe_nvtx_range("attention_scores_matmul", True, device):
+                attention_scores = (
+                    basics_model_module.einsum(
+                        Q,
+                        K,
+                        "... query d_k, ... key d_k -> ... query key",
+                    )
+                    / math.sqrt(d_k)
+                )
+
+            if mask is not None:
+                attention_scores = torch.where(mask, attention_scores, float("-inf"))
+
+            with maybe_nvtx_range("attention_softmax", True, device):
+                attention_weights = basics_model_module.softmax(attention_scores, dim=-1)
+
+            with maybe_nvtx_range("attention_value_matmul", True, device):
+                return basics_model_module.einsum(
+                    attention_weights,
+                    V,
+                    "... query key, ... key d_v ->  ... query d_v",
+                )
+
+    basics_model_module.scaled_dot_product_attention = annotated_scaled_dot_product_attention
+    try:
+        yield
+    finally:
+        basics_model_module.scaled_dot_product_attention = original_attention
 
 
 def run_forward_only(
@@ -307,14 +365,15 @@ def main() -> None:
 
     input_ids, targets = make_batch(config, device)
 
-    for step_idx in range(config.warmup_steps):
-        with maybe_nvtx_range(f"warmup_{step_idx}", config.nvtx, device):
-            run_step(config, model, optimizer, input_ids, targets, device)
+    with maybe_attention_nvtx_patch(config, device):
+        for step_idx in range(config.warmup_steps):
+            with maybe_nvtx_range(f"warmup_{step_idx}", config.nvtx, device):
+                run_step(config, model, optimizer, input_ids, targets, device)
 
-    step_timings: list[dict[str, float]] = []
-    for step_idx in range(config.measure_steps):
-        with maybe_nvtx_range(f"measure_{step_idx}", config.nvtx, device):
-            step_timings.append(run_step(config, model, optimizer, input_ids, targets, device))
+        step_timings: list[dict[str, float]] = []
+        for step_idx in range(config.measure_steps):
+            with maybe_nvtx_range(f"measure_{step_idx}", config.nvtx, device):
+                step_timings.append(run_step(config, model, optimizer, input_ids, targets, device))
 
     summary = summarize_timings(step_timings)
     result = {
