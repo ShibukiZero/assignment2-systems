@@ -1,0 +1,82 @@
+{
+  "config": {
+    "model_size": "2.7b",
+    "context_length": 512,
+    "batch_size": 4,
+    "vocab_size": 10000,
+    "rope_theta": 10000.0,
+    "mode": "forward",
+    "precision": "fp32",
+    "warmup_steps": 5,
+    "measure_steps": 10,
+    "learning_rate": 0.001,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "device": "auto",
+    "output_path": ".agents/logs/1_1_4a_forward/2.7b_ctx512_forward.json"
+  },
+  "device": "cuda",
+  "model_preset": {
+    "d_model": 2560,
+    "d_ff": 10240,
+    "num_layers": 32,
+    "num_heads": 32
+  },
+  "num_parameters": 3406809600,
+  "timings": {
+    "forward_seconds": {
+      "mean_seconds": 0.6449963506311178,
+      "stdev_seconds": 0.00023743139973891596,
+      "min_seconds": 0.6446802318096161,
+      "max_seconds": 0.6453321911394596
+    },
+    "total_seconds": {
+      "mean_seconds": 0.6449963506311178,
+      "stdev_seconds": 0.00023743139973891596,
+      "min_seconds": 0.6446802318096161,
+      "max_seconds": 0.6453321911394596
+    }
+  },
+  "step_timings_seconds": [
+    {
+      "forward_seconds": 0.6447974219918251,
+      "total_seconds": 0.6447974219918251
+    },
+    {
+      "forward_seconds": 0.6448477692902088,
+      "total_seconds": 0.6448477692902088
+    },
+    {
+      "forward_seconds": 0.6453321911394596,
+      "total_seconds": 0.6453321911394596
+    },
+    {
+      "forward_seconds": 0.6452840566635132,
+      "total_seconds": 0.6452840566635132
+    },
+    {
+      "forward_seconds": 0.6452403403818607,
+      "total_seconds": 0.6452403403818607
+    },
+    {
+      "forward_seconds": 0.6448031812906265,
+      "total_seconds": 0.6448031812906265
+    },
+    {
+      "forward_seconds": 0.6446802318096161,
+      "total_seconds": 0.6446802318096161
+    },
+    {
+      "forward_seconds": 0.644810862839222,
+      "total_seconds": 0.644810862839222
+    },
+    {
+      "forward_seconds": 0.6450407169759274,
+      "total_seconds": 0.6450407169759274
+    },
+    {
+      "forward_seconds": 0.6451267339289188,
+      "total_seconds": 0.6451267339289188
+    }
+  ]
+}

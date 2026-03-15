@@ -4,7 +4,7 @@ import argparse
 import json
 import statistics
 import timeit
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
@@ -52,6 +52,7 @@ class BenchmarkConfig:
     weight_decay: float
     seed: int
     device: str
+    nvtx: bool
     output_path: str | None
 
 
@@ -96,6 +97,11 @@ def parse_args() -> BenchmarkConfig:
         help="Use auto to prefer CUDA when available.",
     )
     parser.add_argument(
+        "--nvtx",
+        action="store_true",
+        help="Annotate warmup, measured iterations, and step phases with NVTX ranges.",
+    )
+    parser.add_argument(
         "--output-path",
         type=str,
         default=None,
@@ -116,6 +122,7 @@ def parse_args() -> BenchmarkConfig:
         weight_decay=args.weight_decay,
         seed=args.seed,
         device=args.device,
+        nvtx=args.nvtx,
         output_path=args.output_path,
     )
 
@@ -171,6 +178,19 @@ def make_precision_context(config: BenchmarkConfig, device: torch.device):
     return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
 
 
+@contextmanager
+def maybe_nvtx_range(label: str, enabled: bool, device: torch.device):
+    if not enabled or device.type != "cuda":
+        yield
+        return
+
+    torch.cuda.nvtx.range_push(label)
+    try:
+        yield
+    finally:
+        torch.cuda.nvtx.range_pop()
+
+
 def run_forward_only(
     model: BasicsTransformerLM,
     input_ids: torch.Tensor,
@@ -209,7 +229,8 @@ def run_step(
 
     if config.mode == "forward":
         start = timeit.default_timer()
-        run_forward_only(model, input_ids, precision_context)
+        with maybe_nvtx_range("forward", config.nvtx, device):
+            run_forward_only(model, input_ids, precision_context)
         maybe_synchronize(device)
         forward_end = timeit.default_timer()
         timings["forward_seconds"] = forward_end - start
@@ -217,11 +238,13 @@ def run_step(
     else:
         model.zero_grad(set_to_none=True)
         start = timeit.default_timer()
-        loss = forward_and_loss(model, input_ids, targets, precision_context)
+        with maybe_nvtx_range("forward", config.nvtx, device):
+            loss = forward_and_loss(model, input_ids, targets, precision_context)
         maybe_synchronize(device)
         forward_end = timeit.default_timer()
 
-        loss.backward()
+        with maybe_nvtx_range("backward", config.nvtx, device):
+            loss.backward()
         maybe_synchronize(device)
         backward_end = timeit.default_timer()
 
@@ -231,7 +254,8 @@ def run_step(
         if config.mode == "train-step":
             if optimizer is None:
                 raise ValueError("train-step mode requires an optimizer.")
-            optimizer.step()
+            with maybe_nvtx_range("optimizer_step", config.nvtx, device):
+                optimizer.step()
             maybe_synchronize(device)
             optimizer_end = timeit.default_timer()
             timings["optimizer_step_seconds"] = optimizer_end - backward_end
@@ -283,12 +307,14 @@ def main() -> None:
 
     input_ids, targets = make_batch(config, device)
 
-    for _ in range(config.warmup_steps):
-        run_step(config, model, optimizer, input_ids, targets, device)
+    for step_idx in range(config.warmup_steps):
+        with maybe_nvtx_range(f"warmup_{step_idx}", config.nvtx, device):
+            run_step(config, model, optimizer, input_ids, targets, device)
 
     step_timings: list[dict[str, float]] = []
-    for _ in range(config.measure_steps):
-        step_timings.append(run_step(config, model, optimizer, input_ids, targets, device))
+    for step_idx in range(config.measure_steps):
+        with maybe_nvtx_range(f"measure_{step_idx}", config.nvtx, device):
+            step_timings.append(run_step(config, model, optimizer, input_ids, targets, device))
 
     summary = summarize_timings(step_timings)
     result = {

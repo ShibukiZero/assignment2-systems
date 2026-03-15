@@ -1,0 +1,82 @@
+{
+  "config": {
+    "model_size": "large",
+    "context_length": 256,
+    "batch_size": 4,
+    "vocab_size": 10000,
+    "rope_theta": 10000.0,
+    "mode": "forward",
+    "precision": "fp32",
+    "warmup_steps": 5,
+    "measure_steps": 10,
+    "learning_rate": 0.001,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "device": "auto",
+    "output_path": ".agents/logs/1_1_4a_forward/large_ctx256_forward.json"
+  },
+  "device": "cuda",
+  "model_preset": {
+    "d_model": 1280,
+    "d_ff": 5120,
+    "num_layers": 36,
+    "num_heads": 20
+  },
+  "num_parameters": 969411840,
+  "timings": {
+    "forward_seconds": {
+      "mean_seconds": 0.10840443708002567,
+      "stdev_seconds": 6.837595379131228e-05,
+      "min_seconds": 0.10828262940049171,
+      "max_seconds": 0.10847598686814308
+    },
+    "total_seconds": {
+      "mean_seconds": 0.10840443708002567,
+      "stdev_seconds": 6.837595379131228e-05,
+      "min_seconds": 0.10828262940049171,
+      "max_seconds": 0.10847598686814308
+    }
+  },
+  "step_timings_seconds": [
+    {
+      "forward_seconds": 0.10843891650438309,
+      "total_seconds": 0.10843891650438309
+    },
+    {
+      "forward_seconds": 0.10828262940049171,
+      "total_seconds": 0.10828262940049171
+    },
+    {
+      "forward_seconds": 0.10847598686814308,
+      "total_seconds": 0.10847598686814308
+    },
+    {
+      "forward_seconds": 0.10829820111393929,
+      "total_seconds": 0.10829820111393929
+    },
+    {
+      "forward_seconds": 0.10842787846922874,
+      "total_seconds": 0.10842787846922874
+    },
+    {
+      "forward_seconds": 0.10838672146201134,
+      "total_seconds": 0.10838672146201134
+    },
+    {
+      "forward_seconds": 0.10838308930397034,
+      "total_seconds": 0.10838308930397034
+    },
+    {
+      "forward_seconds": 0.10847287625074387,
+      "total_seconds": 0.10847287625074387
+    },
+    {
+      "forward_seconds": 0.10841404646635056,
+      "total_seconds": 0.10841404646635056
+    },
+    {
+      "forward_seconds": 0.10846402496099472,
+      "total_seconds": 0.10846402496099472
+    }
+  ]
+}

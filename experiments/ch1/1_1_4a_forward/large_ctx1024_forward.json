@@ -1,0 +1,82 @@
+{
+  "config": {
+    "model_size": "large",
+    "context_length": 1024,
+    "batch_size": 4,
+    "vocab_size": 10000,
+    "rope_theta": 10000.0,
+    "mode": "forward",
+    "precision": "fp32",
+    "warmup_steps": 5,
+    "measure_steps": 10,
+    "learning_rate": 0.001,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "device": "auto",
+    "output_path": ".agents/logs/1_1_4a_forward/large_ctx1024_forward.json"
+  },
+  "device": "cuda",
+  "model_preset": {
+    "d_model": 1280,
+    "d_ff": 5120,
+    "num_layers": 36,
+    "num_heads": 20
+  },
+  "num_parameters": 969411840,
+  "timings": {
+    "forward_seconds": {
+      "mean_seconds": 0.4218117158859968,
+      "stdev_seconds": 0.00019089555868010482,
+      "min_seconds": 0.42155715450644493,
+      "max_seconds": 0.42208823189139366
+    },
+    "total_seconds": {
+      "mean_seconds": 0.4218117158859968,
+      "stdev_seconds": 0.00019089555868010482,
+      "min_seconds": 0.42155715450644493,
+      "max_seconds": 0.42208823189139366
+    }
+  },
+  "step_timings_seconds": [
+    {
+      "forward_seconds": 0.4219103045761585,
+      "total_seconds": 0.4219103045761585
+    },
+    {
+      "forward_seconds": 0.421557292342186,
+      "total_seconds": 0.421557292342186
+    },
+    {
+      "forward_seconds": 0.42155715450644493,
+      "total_seconds": 0.42155715450644493
+    },
+    {
+      "forward_seconds": 0.4217277802526951,
+      "total_seconds": 0.4217277802526951
+    },
+    {
+      "forward_seconds": 0.42193110287189484,
+      "total_seconds": 0.42193110287189484
+    },
+    {
+      "forward_seconds": 0.42179597169160843,
+      "total_seconds": 0.42179597169160843
+    },
+    {
+      "forward_seconds": 0.42164888232946396,
+      "total_seconds": 0.42164888232946396
+    },
+    {
+      "forward_seconds": 0.42208823189139366,
+      "total_seconds": 0.42208823189139366
+    },
+    {
+      "forward_seconds": 0.4220638610422611,
+      "total_seconds": 0.4220638610422611
+    },
+    {
+      "forward_seconds": 0.42183657735586166,
+      "total_seconds": 0.42183657735586166
+    }
+  ]
+}

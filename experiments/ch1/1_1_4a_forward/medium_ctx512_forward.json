@@ -1,0 +1,82 @@
+{
+  "config": {
+    "model_size": "medium",
+    "context_length": 512,
+    "batch_size": 4,
+    "vocab_size": 10000,
+    "rope_theta": 10000.0,
+    "mode": "forward",
+    "precision": "fp32",
+    "warmup_steps": 5,
+    "measure_steps": 10,
+    "learning_rate": 0.001,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "device": "auto",
+    "output_path": ".agents/logs/1_1_4a_forward/medium_ctx512_forward.json"
+  },
+  "device": "cuda",
+  "model_preset": {
+    "d_model": 1024,
+    "d_ff": 4096,
+    "num_layers": 24,
+    "num_heads": 16
+  },
+  "num_parameters": 423183360,
+  "timings": {
+    "forward_seconds": {
+      "mean_seconds": 0.09540163539350033,
+      "stdev_seconds": 0.00020124580191777496,
+      "min_seconds": 0.09504004195332527,
+      "max_seconds": 0.09584521874785423
+    },
+    "total_seconds": {
+      "mean_seconds": 0.09540163539350033,
+      "stdev_seconds": 0.00020124580191777496,
+      "min_seconds": 0.09504004195332527,
+      "max_seconds": 0.09584521874785423
+    }
+  },
+  "step_timings_seconds": [
+    {
+      "forward_seconds": 0.09504004195332527,
+      "total_seconds": 0.09504004195332527
+    },
+    {
+      "forward_seconds": 0.09530909731984138,
+      "total_seconds": 0.09530909731984138
+    },
+    {
+      "forward_seconds": 0.09541792422533035,
+      "total_seconds": 0.09541792422533035
+    },
+    {
+      "forward_seconds": 0.09551335498690605,
+      "total_seconds": 0.09551335498690605
+    },
+    {
+      "forward_seconds": 0.09536886587738991,
+      "total_seconds": 0.09536886587738991
+    },
+    {
+      "forward_seconds": 0.09544801339507103,
+      "total_seconds": 0.09544801339507103
+    },
+    {
+      "forward_seconds": 0.09535323083400726,
+      "total_seconds": 0.09535323083400726
+    },
+    {
+      "forward_seconds": 0.09541813284158707,
+      "total_seconds": 0.09541813284158707
+    },
+    {
+      "forward_seconds": 0.09530247375369072,
+      "total_seconds": 0.09530247375369072
+    },
+    {
+      "forward_seconds": 0.09584521874785423,
+      "total_seconds": 0.09584521874785423
+    }
+  ]
+}
