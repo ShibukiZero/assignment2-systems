@@ -5,7 +5,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
-OUTPUT_DIR="${1:-experiments/ch1/1_1_4a_forward}"
+OUTPUT_DIR="${1:-.agents/logs/1_1_4a_forward}"
 mkdir -p "${OUTPUT_DIR}"
 
 SIZES=(small medium large xl 2.7b)
