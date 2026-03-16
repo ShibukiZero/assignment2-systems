@@ -31,28 +31,28 @@
 
 **Deliverable:** A 1-2 sentence response.
 
-**Answer:** The total forward-pass time reported by Nsight Systems closely matches the Python benchmark results. At context length 128, the relative difference stays within about 0.7%-1.4% across all five model sizes, so the profiler confirms the earlier benchmark timings up to small profiling and measurement overheads.
+**Answer:** At context length 128, Nsight Systems reports forward-pass times of 25.245 ms (`small`), 49.488 ms (`medium`), 75.931 ms (`large`), 101.033 ms (`xl`), and 158.597 ms (`2.7b`). Compared with the earlier Python benchmark from `1.1.3(b)` (21.837 ms, 42.146 ms, 62.412 ms, 101.257 ms, and 158.532 ms respectively), the agreement is very close for `xl` and `2.7b`, but noticeably looser for the smaller three models, so the overall trend matches while the exact values do not align equally well across all sizes.
 
 ### (b)
 **Question:** What CUDA kernel takes the most cumulative GPU time during the forward pass? How many times is this kernel invoked during a single forward pass of the model? Is it the same kernel that takes the most runtime when you do both forward and backward passes?
 
 **Deliverable:** A 1-2 sentence response.
 
-**Answer:** TODO
+**Answer:** In a representative `2.7b`, context-length-512 forward trace, the CUDA GPU Kernel Summary is dominated by the Tensor Core GEMM kernel `sm80_xmma_gemm_f32f32_f32f32_f32_tn_n_tilesize64x64x8_...`, which appears 975 times across the 15 profiled forward passes, i.e. about 65 times per forward pass. In the corresponding full training-step trace, the top kernel is still a Tensor Core GEMM, but it changes to `sm80_xmma_gemm_f32f32_f32f32_f32_tn_n_tilesize128x64x8_...` rather than remaining exactly the same kernel.
 
 ### (c)
 **Question:** Besides matrix multiplies, what other kernels account for non-trivial CUDA runtime in the forward pass?
 
 **Deliverable:** A 1-2 sentence response.
 
-**Answer:** TODO
+**Answer:** Besides GEMM kernels, the CUDA GPU Kernel Summary still shows visible time in ATen `elementwise_kernel`, `vectorized_elementwise_kernel`, and `reduce_kernel` launches. In the representative `2.7b`, context-length-512 forward trace, these non-matmul kernels are much smaller than the dominant GEMMs, but several still contribute on the order of about 0.5%-1.5% each to total GPU time.
 
 ### (d)
 **Question:** Profile one complete training step with AdamW. How does the fraction of time spent on matrix multiplication change compared to inference-only? How about other kernels?
 
 **Deliverable:** A 1-2 sentence response.
 
-**Answer:** TODO
+**Answer:** In the representative `2.7b`, context-length-512 traces, kernels whose names contain `gemm`, `xmma`, or `cutlass` account for about `92.20%` of forward-only GPU time but about `83.90%` of full training-step GPU time, so matrix multiplication still dominates training but by a smaller margin than in inference. The missing share is taken up by backward- and optimizer-related ATen `elementwise_kernel`, `vectorized_elementwise_kernel`, and `reduce_kernel` launches, which become much more prominent once gradient computation and AdamW updates are included.
 
 ### (e)
 **Question:** Compare the runtime of the softmax operation versus the matrix multiplication operations within the self-attention layer during a forward pass. How does the runtime difference compare to the FLOP difference?

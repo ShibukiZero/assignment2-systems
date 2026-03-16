@@ -1,6 +1,6 @@
 ## 1.1.4(a) Forward Timing Comparison at Context Length 128
 
-This table compares the Python benchmark forward mean against the Nsight Systems NVTX-projected forward mean, using only the `measure_*` iterations so the comparison matches the benchmarking methodology from `1.1.3(b)`.
+This table compares the Python timing emitted by the profiling sweep against the Nsight Systems NVTX-projected forward mean, using only the `measure_*` iterations from the NVTX export.
 
 | Model size | Context length | Benchmark forward (ms) | nsys NVTX forward (ms) | Abs diff (ms) | Rel diff (%) |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -12,7 +12,7 @@ This table compares the Python benchmark forward mean against the Nsight Systems
 
 Conclusion:
 
-The total forward-pass time reported by Nsight Systems closely matches the Python benchmark results. At context length 128, the relative difference stays within about 0.7%-1.4% across all five model sizes, so the profiler confirms the earlier benchmark timings up to small profiling and measurement overheads.
+At context length 128, the profiling sweep's Python timing and the Nsight Systems NVTX-projected timing agree closely. However, this is not identical to the earlier `1.1.3(b)` benchmark baseline: compared with that baseline, the `xl` and `2.7b` numbers remain very close, while the `small`, `medium`, and `large` runs show a more noticeable gap, so the matching claim should be stated more cautiously in the writeup.
 
 Source files:
 
