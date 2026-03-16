@@ -59,7 +59,7 @@
 
 **Deliverable:** A 1-2 sentence response.
 
-**Answer:** TODO
+**Answer:** Interpreting the "self-attention layer" here as the core scaled-dot-product attention, the representative `2.7b`, context-length-512 forward trace reports `attention_softmax` at about `626,461 ns` on average, versus about `380,087 ns` for `attention_scores_matmul` and `329,561 ns` for `attention_value_matmul`, so softmax is slower than either individual matmul and is still on the same order as the two matmuls together. However, the FLOP gap is much larger: the scripted estimate gives each matmul about `5.37e9` FLOPs per layer versus only about `2.35e8` for softmax (about `22.87x` larger for each matmul, or `45.74x` for the two matmuls combined), which suggests that softmax is much more memory- and reduction-bound than the GEMM kernels.
 
 ---
 
