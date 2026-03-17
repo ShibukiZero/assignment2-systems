@@ -68,12 +68,47 @@
 ### Accumulation experiment
 **Question:** Run the accumulation example from the handout and comment on the accuracy of the results.
 
+```python
+s = torch.tensor(0, dtype=torch.float32)
+for i in range(1000):
+    s += torch.tensor(0.01, dtype=torch.float32)
+
+s = torch.tensor(0, dtype=torch.float16)
+for i in range(1000):
+    s += torch.tensor(0.01, dtype=torch.float16)
+
+s = torch.tensor(0, dtype=torch.float32)
+for i in range(1000):
+    s += torch.tensor(0.01, dtype=torch.float16)
+
+s = torch.tensor(0, dtype=torch.float32)
+for i in range(1000):
+    x = torch.tensor(0.01, dtype=torch.float16)
+    s += x.type(torch.float32)
+```
+
 **Deliverable:** A 2-3 sentence response.
 
-**Answer:** TODO
+**Answer:** Accumulating `0.01` in FP32 stays very close to the expected value of `10`, while accumulating in FP16 underestimates much more noticeably (`9.9531` in our run), because both the input value and the running sum are repeatedly rounded at FP16 precision. Using FP16 inputs with an FP32 accumulator is much more accurate (`10.0021` here), even though it is still slightly worse than pure FP32 because the value `0.01` has already been quantized once when it is first represented in FP16. This illustrates why mixed-precision training usually keeps reductions and accumulations in higher precision even when some inputs or matmuls use lower precision.
 
 ### 1.1.5(a) Dtypes Under Autocast
 **Question:** For the toy model under FP16 autocast, what are the data types of:
+
+```python
+class ToyModel(nn.Module):
+    def __init__(self, in_features: int, out_features: int):
+        super().__init__()
+        self.fc1 = nn.Linear(in_features, 10, bias=False)
+        self.ln = nn.LayerNorm(10)
+        self.fc2 = nn.Linear(10, out_features, bias=False)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        x = self.relu(self.fc1(x))
+        x = self.ln(x)
+        x = self.fc2(x)
+        return x
+```
 
 - the model parameters within the autocast context,
 - the output of the first feed-forward layer,
@@ -84,21 +119,21 @@
 
 **Deliverable:** The data types for each of the listed components.
 
-**Answer:** TODO
+**Answer:** In our CUDA autocast check, the model parameters remain `float32`, the output of the first feed-forward layer (`fc1`) is `float16`, the output of layer norm is `float32`, the model logits are `float16`, the loss is `float32`, and the gradients are `float32`. This matches the intended mixed-precision pattern: linear layers run in lower precision where possible, while numerically sensitive normalization, loss computation, and stored parameter/gradient state stay in FP32.
 
 ### 1.1.5(b) LayerNorm and Mixed Precision
-**Question:** What parts of layer normalization are sensitive to mixed precision? If we use BF16 instead of FP16, do we still need to treat layer normalization differently? Why or why not?
+**Question:** You should have seen that FP16 mixed precision autocasting treats the layer normalization layer differently than the feed-forward layers. What parts of layer normalization are sensitive to mixed precision? If we use BF16 instead of FP16, do we still need to treat layer normalization differently? Why or why not?
 
 **Deliverable:** A 2-3 sentence response.
 
-**Answer:** TODO
+**Answer:** The numerically sensitive parts of layer normalization are the mean/variance reductions, the accumulation of squared values, and the normalization step itself (subtracting the mean and dividing by the standard deviation), because these operations can amplify rounding error and are more vulnerable to overflow or underflow in low precision. With FP16, this makes it important to keep LayerNorm in higher precision. BF16 is much more stable because it has the same exponent range as FP32, so the overflow/underflow problem is much less severe, but its mantissa is still shorter than FP32, so treating LayerNorm more carefully can still improve numerical robustness.
 
 ### 1.1.5(c) BF16 Benchmarking
 **Question:** Modify the benchmarking script to optionally run with BF16 mixed precision. Time the forward and backward passes with and without mixed precision for each language model size in Section 1.1.2. Compare the results and comment on any trends as model size changes.
 
 **Deliverable:** A 2-3 sentence response with timings and commentary.
 
-**Answer:** TODO
+**Answer:** BF16 mixed precision provides little or no benefit on the smallest workloads, but it becomes increasingly effective as model size and context length grow. For example, at context length `128`, the total step time changes from `42.48 ms` to `46.74 ms` for `small` (`0.91x`) but from `475.01 ms` to `202.29 ms` for `2.7b` (`2.35x`), while at context length `1024` the same comparison is `195.26 ms` to `98.84 ms` for `small` (`1.98x`) and `3766.59 ms` to `1181.84 ms` for `2.7b` (`3.19x`). This pattern is consistent with larger workloads benefiting much more from Tensor Core acceleration once matrix multiplications dominate the runtime. The full timing tables are archived in `artifacts/experiments/ch1/1_1_5c/summary.md`.
 
 ---
 
