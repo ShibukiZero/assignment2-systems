@@ -56,6 +56,11 @@ class BenchmarkConfig:
     device: str
     nvtx: bool
     attention_nvtx: bool
+    memory_profile: bool
+    memory_snapshot_path: str | None
+    memory_max_entries: int
+    memory_history_context: str | None
+    memory_history_stacks: str | None
     output_path: str | None
 
 
@@ -113,6 +118,47 @@ def parse_args() -> BenchmarkConfig:
         ),
     )
     parser.add_argument(
+        "--memory-profile",
+        action="store_true",
+        help=(
+            "Record one post-warmup CUDA memory snapshot with torch.cuda.memory history. "
+            "Useful for Chapter 1 memory profiling."
+        ),
+    )
+    parser.add_argument(
+        "--memory-snapshot-path",
+        type=str,
+        default=None,
+        help=(
+            "Optional output path for the PyTorch CUDA memory snapshot pickle. "
+            "If omitted, a filename is derived from the benchmark configuration."
+        ),
+    )
+    parser.add_argument(
+        "--memory-max-entries",
+        type=int,
+        default=1_000_000,
+        help="Maximum number of CUDA memory history entries to retain while recording.",
+    )
+    parser.add_argument(
+        "--memory-history-context",
+        type=str,
+        default=None,
+        help=(
+            "Optional context setting for torch.cuda.memory._record_memory_history, "
+            'e.g. "state", "alloc", or "all".'
+        ),
+    )
+    parser.add_argument(
+        "--memory-history-stacks",
+        type=str,
+        default=None,
+        help=(
+            'Optional stack setting for torch.cuda.memory._record_memory_history, '
+            'e.g. "python" or "all".'
+        ),
+    )
+    parser.add_argument(
         "--output-path",
         type=str,
         default=None,
@@ -135,6 +181,11 @@ def parse_args() -> BenchmarkConfig:
         device=args.device,
         nvtx=args.nvtx,
         attention_nvtx=args.attention_nvtx,
+        memory_profile=args.memory_profile,
+        memory_snapshot_path=args.memory_snapshot_path,
+        memory_max_entries=args.memory_max_entries,
+        memory_history_context=args.memory_history_context,
+        memory_history_stacks=args.memory_history_stacks,
         output_path=args.output_path,
     )
 
@@ -150,6 +201,28 @@ def resolve_device(device_arg: str) -> torch.device:
 def maybe_synchronize(device: torch.device) -> None:
     if device.type == "cuda":
         torch.cuda.synchronize(device)
+
+
+def collect_cuda_memory_stats(device: torch.device) -> dict[str, int]:
+    stats = torch.cuda.memory_stats(device)
+    return {
+        "current_allocated_bytes": int(torch.cuda.memory_allocated(device)),
+        "current_reserved_bytes": int(torch.cuda.memory_reserved(device)),
+        "max_allocated_bytes": int(torch.cuda.max_memory_allocated(device)),
+        "max_reserved_bytes": int(torch.cuda.max_memory_reserved(device)),
+        "active_peak_bytes": int(stats.get("active_bytes.all.peak", 0)),
+        "requested_peak_bytes": int(stats.get("requested_bytes.all.peak", 0)),
+    }
+
+
+def resolve_memory_snapshot_path(config: BenchmarkConfig) -> Path:
+    if config.memory_snapshot_path is not None:
+        return Path(config.memory_snapshot_path)
+
+    mode_tag = config.mode.replace("-", "_")
+    return Path(
+        f"{config.model_size}_ctx{config.context_length}_{mode_tag}_{config.precision}_memory_snapshot.pickle"
+    )
 
 
 def make_model(config: BenchmarkConfig, device: torch.device) -> BasicsTransformerLM:
@@ -338,7 +411,7 @@ def summarize_series(series: list[float]) -> dict[str, float]:
 
 def summarize_timings(step_timings: list[dict[str, float]]) -> dict[str, dict[str, float]]:
     if not step_timings:
-        raise ValueError("step_timings must be non-empty.")
+        return {}
 
     metric_names = step_timings[0].keys()
     summary: dict[str, dict[str, float]] = {}
@@ -350,6 +423,8 @@ def summarize_timings(step_timings: list[dict[str, float]]) -> dict[str, dict[st
 def main() -> None:
     config = parse_args()
     device = resolve_device(config.device)
+    if config.memory_profile and device.type != "cuda":
+        raise ValueError("CUDA memory profiling requires running this script on a CUDA device.")
     torch.manual_seed(config.seed)
     if device.type == "cuda":
         torch.cuda.manual_seed_all(config.seed)
@@ -364,11 +439,44 @@ def main() -> None:
         )
 
     input_ids, targets = make_batch(config, device)
+    memory_profile_result: dict[str, object] | None = None
 
     with maybe_attention_nvtx_patch(config, device):
         for step_idx in range(config.warmup_steps):
             with maybe_nvtx_range(f"warmup_{step_idx}", config.nvtx, device):
                 run_step(config, model, optimizer, input_ids, targets, device)
+
+        if config.memory_profile:
+            snapshot_path = resolve_memory_snapshot_path(config)
+            snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+            torch.cuda.reset_peak_memory_stats(device)
+            record_history_kwargs: dict[str, object] = {
+                "max_entries": config.memory_max_entries,
+            }
+            if config.memory_history_context is not None:
+                record_history_kwargs["context"] = config.memory_history_context
+            if config.memory_history_stacks is not None:
+                record_history_kwargs["stacks"] = config.memory_history_stacks
+            torch.cuda.memory._record_memory_history(**record_history_kwargs)
+            try:
+                memory_before_profile = collect_cuda_memory_stats(device)
+                with maybe_nvtx_range("memory_profile", config.nvtx, device):
+                    profiled_step_timings = run_step(config, model, optimizer, input_ids, targets, device)
+                maybe_synchronize(device)
+                memory_after_profile = collect_cuda_memory_stats(device)
+                torch.cuda.memory._dump_snapshot(str(snapshot_path))
+            finally:
+                torch.cuda.memory._record_memory_history(enabled=None)
+
+            memory_profile_result = {
+                "snapshot_path": str(snapshot_path),
+                "max_entries": config.memory_max_entries,
+                "history_context": config.memory_history_context,
+                "history_stacks": config.memory_history_stacks,
+                "profiled_step_timings_seconds": profiled_step_timings,
+                "memory_before_profile_bytes": memory_before_profile,
+                "memory_after_profile_bytes": memory_after_profile,
+            }
 
         step_timings: list[dict[str, float]] = []
         for step_idx in range(config.measure_steps):
@@ -384,6 +492,8 @@ def main() -> None:
         "timings": summary,
         "step_timings_seconds": step_timings,
     }
+    if memory_profile_result is not None:
+        result["memory_profile"] = memory_profile_result
     result_json = json.dumps(result, indent=2)
 
     if config.output_path is not None:

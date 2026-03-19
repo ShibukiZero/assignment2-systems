@@ -148,15 +148,15 @@ class ToyModel(nn.Module):
 
 Forward-pass timeline:
 
-![Forward memory timeline](TODO)
+![Forward memory timeline](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch1/1_1_6a/fp32_2.7b_ctx512_forward_active_memory_timeline.png)
 
 Training-step timeline:
 
-![Training memory timeline](TODO)
+![Training memory timeline](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch1/1_1_6a/fp32_2.7b_ctx512_train_step_active_memory_timeline.png)
 
 Response:
 
-TODO
+The forward-only active-memory timeline is not completely flat: it shows a roughly periodic sequence of about `32` spikes, which lines up well with the `32` Transformer blocks in the `2.7b` model. The spike size is on the order of about `128 MiB`, which is consistent with transient attention score/probability tensors of shape `batch x heads x seq x seq` being materialized and then released within each block during inference. The full training-step timeline has a clearer multi-stage structure: memory first drops sharply, then rises relatively quickly, then decreases more gradually, and finally rises again. This is consistent with the forward pass building up saved activations, the backward pass releasing part of that activation memory while traversing the graph, and the final optimizer step plus allocator/cache effects changing the live-memory footprint again. So yes, the timeline shape is informative enough that the broad stages of the training step can be inferred from the peaks and valleys.
 
 ### (b)
 **Question:** What is the peak memory usage of each context length when doing a forward pass? What about when doing a full training step?
@@ -167,30 +167,32 @@ TODO
 
 | Context length | Forward peak memory | Full training step peak memory |
 | --- | --- | --- |
-| 128 | TODO | TODO |
-| 256 | TODO | TODO |
-| 512 | TODO | TODO |
+| 128 | 12.93 GiB | 51.44 GiB |
+| 256 | 13.02 GiB | 51.44 GiB |
+| 512 | 13.45 GiB | 65.52 GiB |
+
+Forward-only peak memory grows with context length but only moderately, whereas the full training step uses much more memory overall and shows a much larger increase by context length 512. This is consistent with training needing to retain saved activations, gradients, and optimizer-related state in addition to the forward-pass allocations.
 
 ### (c)
 **Question:** Find the peak memory usage of the 2.7B model when using mixed precision, for both a forward pass and a full optimizer step. Does mixed precision significantly affect memory usage?
 
 **Deliverable:** A 2-3 sentence response.
 
-**Answer:** TODO
+**Answer:** In this setup, BF16 does not significantly reduce measured peak memory overall. For forward-only runs, the measured peak memory is actually higher under BF16 at all three tested context lengths (`12.93 -> 19.16 GiB`, `13.02 -> 19.18 GiB`, and `13.45 -> 19.41 GiB` for context lengths `128`, `256`, and `512` respectively), while for full training steps it is nearly unchanged at shorter contexts (`51.44 -> 51.44 GiB` at `128`, `51.44 -> 52.11 GiB` at `256`) and only modestly lower at `512` (`65.52 -> 62.69 GiB`). A plausible explanation is that BF16 autocast changes the execution path rather than simply shrinking every tensor: parameters and optimizer state still remain in FP32, while extra cast/workspace buffers can be introduced during lower-precision execution, so the net peak-memory effect is small and can even be negative for forward-only runs.
 
 ### (d)
-**Question:** At the reference hyperparameters for the 2.7B model, what is the size of one tensor of activations in the Transformer residual stream, in single precision? Give the size in MB.
+**Question:** Consider the 2.7B model. At our reference hyperparameters, what is the size of a tensor of activations in the Transformer residual stream, in single precision? Give this size in MB.
 
 **Deliverable:** A 1-2 sentence response with your derivation.
 
-**Answer:** TODO
+**Answer:** For the 2.7B model, the residual-stream activation tensor at the reference hyperparameters has shape `(batch_size, context_length, d_model) = (4, 128, 2560)`, so it contains `4 * 128 * 2560 = 1,310,720` elements. In single precision this is `1,310,720 * 4 = 5,242,880` bytes, which is exactly `5.00 MiB` after dividing by `1024^2`.
 
 ### (e)
-**Question:** At lower detail in the active memory timeline, what is the size of the largest allocations shown? Looking through the stack trace, where do those allocations come from?
+**Question:** Now look closely at the “Active Memory Timeline” from pytorch.org/memory_viz of a memory snapshot of the 2.7B model doing a forward pass. When you reduce the “Detail” level, the tool hides the smallest allocations to the corresponding level. What is the size of the largest allocations shown? Looking through the stack trace, can you tell where those allocations come from?
 
 **Deliverable:** A 1-2 sentence response.
 
-**Answer:** TODO
+**Answer:** The largest allocations visible in the forward-pass memory snapshot are about `128 MiB` each. Their stack traces point to the `softmax` call inside `scaled_dot_product_attention`, which matches the size of an explicitly materialized attention score/weight tensor of shape `(batch, heads, seq_len, seq_len)` for the `2.7b` model at `batch=4`, `heads=32`, and `seq_len=512` (`4 * 32 * 512 * 512 * 4 bytes = 128 MiB`), so these allocations come from the naive self-attention implementation rather than the residual-stream activations.
 
 ---
 
