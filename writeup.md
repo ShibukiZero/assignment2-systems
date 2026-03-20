@@ -205,36 +205,38 @@ Forward-only peak memory grows with context length but only moderately, whereas 
 
 **Answer:**
 
-| d_model | Sequence length | Forward timing | Backward timing | Memory before backward | Status |
-| --- | --- | --- | --- | --- | --- |
-| 16 | 256 | TODO | TODO | TODO | TODO |
-| 16 | 1024 | TODO | TODO | TODO | TODO |
-| 16 | 4096 | TODO | TODO | TODO | TODO |
-| 16 | 8192 | TODO | TODO | TODO | TODO |
-| 16 | 16384 | TODO | TODO | TODO | TODO |
-| 32 | 256 | TODO | TODO | TODO | TODO |
-| 32 | 1024 | TODO | TODO | TODO | TODO |
-| 32 | 4096 | TODO | TODO | TODO | TODO |
-| 32 | 8192 | TODO | TODO | TODO | TODO |
-| 32 | 16384 | TODO | TODO | TODO | TODO |
-| 64 | 256 | TODO | TODO | TODO | TODO |
-| 64 | 1024 | TODO | TODO | TODO | TODO |
-| 64 | 4096 | TODO | TODO | TODO | TODO |
-| 64 | 8192 | TODO | TODO | TODO | TODO |
-| 64 | 16384 | TODO | TODO | TODO | TODO |
-| 128 | 256 | TODO | TODO | TODO | TODO |
-| 128 | 1024 | TODO | TODO | TODO | TODO |
-| 128 | 4096 | TODO | TODO | TODO | TODO |
-| 128 | 8192 | TODO | TODO | TODO | TODO |
-| 128 | 16384 | TODO | TODO | TODO | TODO |
+| d_model | Sequence length | Forward timing (ms) | Backward timing (ms) | Saved for backward (GiB) | Status |
+| --- | --- | ---: | ---: | ---: | --- |
+| 16 | 256 | 0.262 | 0.605 | 0.004 | success |
+| 16 | 1024 | 0.323 | 0.849 | 0.063 | success |
+| 16 | 4096 | 3.298 | 7.581 | 1.002 | success |
+| 16 | 8192 | 13.383 | 31.941 | 4.005 | success |
+| 16 | 16384 | 51.331 | 121.836 | 16.009 | success |
+| 32 | 256 | 0.244 | 0.562 | 0.004 | success |
+| 32 | 1024 | 0.339 | 0.866 | 0.064 | success |
+| 32 | 4096 | 3.469 | 7.728 | 1.004 | success |
+| 32 | 8192 | 14.281 | 29.686 | 4.009 | success |
+| 32 | 16384 | 55.450 | 115.465 | 16.017 | success |
+| 64 | 256 | 0.246 | 0.552 | 0.004 | success |
+| 64 | 1024 | 0.366 | 0.918 | 0.065 | success |
+| 64 | 4096 | 4.009 | 8.757 | 1.008 | success |
+| 64 | 8192 | 16.264 | 33.791 | 4.016 | success |
+| 64 | 16384 | 61.564 | 128.291 | 16.033 | success |
+| 128 | 256 | 0.269 | 0.659 | 0.005 | success |
+| 128 | 1024 | 0.449 | 1.117 | 0.066 | success |
+| 128 | 4096 | 5.298 | 11.448 | 1.016 | success |
+| 128 | 8192 | 20.726 | 42.572 | 4.032 | success |
+| 128 | 16384 | 79.873 | 166.429 | 16.064 | success |
 
 Memory accounting:
 
-TODO
+For a single FP32 attention intermediate of shape `(B, T, T)`, the memory cost is `B * T * T * 4` bytes. However, the measured memory saved for backward is closer to about twice that amount, because by the end of the forward pass the naive implementation appears to keep roughly two large `B x T x T` FP32 intermediates alive, corresponding naturally to the pre-softmax attention scores and the post-softmax attention weights. For example, with `B=8` and `T=16384`, one such tensor would require `8 * 16384 * 16384 * 4 = 8 GiB`, while the measured saved-for-backward memory is about `16 GiB`, consistent with storing about two such tensors rather than just one.
 
 Response:
 
-TODO
+In the tested range, none of the requested configurations ran out of memory, so we did not observe an OOM threshold within this sweep. Even without an actual OOM, however, the quadratic memory trend is very clear: the memory saved for backward depends overwhelmingly on sequence length rather than embedding dimension, and it grows by about `4x` whenever the sequence length doubles. For example, at `d_model=128`, the saved-for-backward memory increases from about `1.02 GiB` at `T=4096` to `4.03 GiB` at `T=8192` and then to `16.06 GiB` at `T=16384`.
+
+The timing results show the same high-level pattern. Both forward and backward latency rise sharply with sequence length, while increasing `d_model` has a much smaller effect than increasing `T`. This indicates that the dominant bottleneck in naive attention at long sequence length is the `T x T` attention matrix and its associated memory traffic, not the `T x d_model` inputs themselves. To eliminate this memory cost, we would avoid explicitly materializing the full attention matrix and instead use a tiled attention algorithm with online softmax and recomputation, as in FlashAttention.
 
 ---
 
