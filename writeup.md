@@ -249,9 +249,32 @@ The timing results show the same high-level pattern. Both forward and backward l
 
 **Answer:**
 
-| Configuration | Uncompiled forward | Compiled forward | Uncompiled backward | Compiled backward |
-| --- | --- | --- | --- | --- |
-| TODO | TODO | TODO | TODO | TODO |
+| d_model | Sequence length | Uncompiled forward (ms) | Compiled forward (ms) | Forward speedup | Uncompiled backward (ms) | Compiled backward (ms) | Backward speedup |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 16 | 256 | 0.257 | 0.212 | 1.21x | 0.605 | 0.507 | 1.19x |
+| 16 | 1024 | 0.315 | 0.226 | 1.39x | 0.826 | 0.592 | 1.40x |
+| 16 | 4096 | 3.291 | 1.568 | 2.10x | 7.520 | 3.486 | 2.16x |
+| 16 | 8192 | 13.348 | 5.455 | 2.45x | 31.717 | 15.373 | 2.06x |
+| 16 | 16384 | 51.325 | 21.015 | 2.44x | 121.785 | 57.350 | 2.12x |
+| 32 | 256 | 0.266 | 0.216 | 1.23x | 0.604 | 0.495 | 1.22x |
+| 32 | 1024 | 0.330 | 0.260 | 1.27x | 0.838 | 0.656 | 1.28x |
+| 32 | 4096 | 3.458 | 1.712 | 2.02x | 7.692 | 3.592 | 2.14x |
+| 32 | 8192 | 14.236 | 6.364 | 2.24x | 29.488 | 13.126 | 2.25x |
+| 32 | 16384 | 55.150 | 25.263 | 2.18x | 115.017 | 51.274 | 2.24x |
+| 64 | 256 | 0.245 | 0.261 | 0.94x | 0.564 | 0.604 | 0.93x |
+| 64 | 1024 | 0.370 | 0.285 | 1.30x | 0.922 | 0.698 | 1.32x |
+| 64 | 4096 | 3.986 | 2.255 | 1.77x | 8.716 | 4.672 | 1.87x |
+| 64 | 8192 | 16.223 | 8.599 | 1.89x | 33.600 | 18.100 | 1.86x |
+| 64 | 16384 | 61.485 | 31.538 | 1.95x | 128.266 | 64.758 | 1.98x |
+| 128 | 256 | 0.261 | 0.248 | 1.05x | 0.639 | 0.615 | 1.04x |
+| 128 | 1024 | 0.449 | 0.366 | 1.23x | 1.100 | 0.889 | 1.24x |
+| 128 | 4096 | 5.293 | 3.581 | 1.48x | 11.422 | 7.451 | 1.53x |
+| 128 | 8192 | 20.750 | 12.863 | 1.61x | 42.715 | 26.367 | 1.62x |
+| 128 | 16384 | 79.879 | 50.131 | 1.59x | 166.506 | 103.913 | 1.60x |
+
+`torch.compile` helps only modestly on the shortest sequences, but becomes much more effective as sequence length grows. Averaging across `d_model`, the forward/backward speedups are only about `1.11x/1.10x` at `T=256`, rise to about `1.30x/1.31x` at `T=1024`, and then reach roughly `1.84x/1.93x` at `T=4096` and about `2x` by `T=8192` and `T=16384`. This suggests that compilation is most helpful when long-sequence attention creates enough graph structure for PyTorch to fuse away substantial dispatch, elementwise, and reduction overhead.
+
+The gains are smaller at larger `d_model`. Averaging across sequence lengths, the forward speedup decreases from about `1.92x` at `d_model=16` to about `1.39x` at `d_model=128`, and the backward speedup decreases similarly from about `1.79x` to about `1.41x`. A plausible explanation is that as `d_model` increases, matrix multiplications take a larger fraction of the runtime, leaving less relative overhead for `torch.compile` to eliminate. This also explains why very small workloads can see little benefit or even a slight slowdown, such as the `d_model=64`, `T=256` case.
 
 ### (b)
 **Question:** Compile the entire Transformer model in the end-to-end benchmarking script. How does the performance of the forward pass change? What about the combined forward and backward passes and optimizer steps?
@@ -260,9 +283,17 @@ The timing results show the same high-level pattern. Both forward and backward l
 
 **Answer:**
 
-| Configuration | Vanilla forward | Compiled forward | Vanilla train step | Compiled train step |
-| --- | --- | --- | --- | --- |
-| TODO | TODO | TODO | TODO | TODO |
+| Model size | Vanilla forward (ms) | Compiled forward (ms) | Forward speedup | Vanilla train step (ms) | Compiled train step (ms) | Train-step speedup |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| small | 18.753 | 6.983 | 2.69x | 56.712 | 32.093 | 1.77x |
+| medium | 36.779 | 21.954 | 1.68x | 115.305 | 88.104 | 1.31x |
+| large | 55.654 | 48.720 | 1.14x | 226.891 | 201.570 | 1.13x |
+| xl | 100.988 | 90.707 | 1.11x | 406.375 | 381.541 | 1.07x |
+| 2.7b | 158.315 | 149.824 | 1.06x | 618.726 | 596.189 | 1.04x |
+
+Compiling the full Transformer model improves forward-only performance at every tested model size, but the benefit decreases rapidly as the model grows. The forward speedup is very large for `small` (`2.69x`) and still noticeable for `medium` (`1.68x`), but it shrinks to only `1.06x` by `2.7b`. This suggests that `torch.compile` is especially helpful when a larger fraction of the forward pass is spent on Python overhead, dispatch overhead, and fusible non-GEMM operations, whereas for larger models the runtime is increasingly dominated by already highly optimized large matrix multiplications.
+
+The train-step speedup is smaller across the board and becomes quite limited for the largest models. For example, `small` improves from `56.712 ms` to `32.093 ms` (`1.77x`), while `2.7b` improves only from `618.726 ms` to `596.189 ms` (`1.04x`). Looking at the train-step breakdown, compilation reduces forward time and helps backward somewhat, but the optimizer step is almost unchanged, so as model size increases and backward plus optimizer work take a larger share of the total iteration time, the overall end-to-end gain from compiling the model is substantially diluted.
 
 ---
 

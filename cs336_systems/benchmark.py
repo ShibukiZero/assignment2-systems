@@ -54,6 +54,7 @@ class BenchmarkConfig:
     weight_decay: float
     seed: int
     device: str
+    compile_model: bool
     nvtx: bool
     attention_nvtx: bool
     memory_profile: bool
@@ -103,6 +104,11 @@ def parse_args() -> BenchmarkConfig:
         choices=("auto", "cpu", "cuda"),
         default="auto",
         help="Use auto to prefer CUDA when available.",
+    )
+    parser.add_argument(
+        "--compile-model",
+        action="store_true",
+        help="Compile the entire Transformer model with torch.compile before benchmarking.",
     )
     parser.add_argument(
         "--nvtx",
@@ -179,6 +185,7 @@ def parse_args() -> BenchmarkConfig:
         weight_decay=args.weight_decay,
         seed=args.seed,
         device=args.device,
+        compile_model=args.compile_model,
         nvtx=args.nvtx,
         attention_nvtx=args.attention_nvtx,
         memory_profile=args.memory_profile,
@@ -237,6 +244,15 @@ def make_model(config: BenchmarkConfig, device: torch.device) -> BasicsTransform
         rope_theta=config.rope_theta,
     )
     return model.to(device)
+
+
+def maybe_compile_model(
+    model: torch.nn.Module,
+    config: BenchmarkConfig,
+) -> torch.nn.Module:
+    if not config.compile_model:
+        return model
+    return torch.compile(model)
 
 
 def make_batch(config: BenchmarkConfig, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
@@ -323,7 +339,7 @@ def maybe_attention_nvtx_patch(config: BenchmarkConfig, device: torch.device):
 
 
 def run_forward_only(
-    model: BasicsTransformerLM,
+    model: torch.nn.Module,
     input_ids: torch.Tensor,
     precision_context,
 ) -> None:
@@ -334,7 +350,7 @@ def run_forward_only(
 
 
 def forward_and_loss(
-    model: BasicsTransformerLM,
+    model: torch.nn.Module,
     input_ids: torch.Tensor,
     targets: torch.Tensor,
     precision_context,
@@ -348,7 +364,7 @@ def forward_and_loss(
 
 def run_step(
     config: BenchmarkConfig,
-    model: BasicsTransformerLM,
+    model: torch.nn.Module,
     optimizer: AdamW | None,
     input_ids: torch.Tensor,
     targets: torch.Tensor,
@@ -429,7 +445,7 @@ def main() -> None:
     if device.type == "cuda":
         torch.cuda.manual_seed_all(config.seed)
 
-    model = make_model(config, device)
+    model = maybe_compile_model(make_model(config, device), config)
     optimizer = None
     if config.mode == "train-step":
         optimizer = AdamW(
