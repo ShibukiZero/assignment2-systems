@@ -5,6 +5,13 @@ import math
 import torch
 from einops import reduce, einsum
 
+try:
+    import triton
+    import triton.language as tl
+except ImportError:  # pragma: no cover - Triton is only required on CUDA hosts.
+    triton = None
+    tl = None
+
 
 MIN_TILE_SIZE = 16
 
@@ -160,6 +167,105 @@ def _flash_attention_backward_pytorch_recompute(
     raise NotImplementedError("TODO: implement the recomputation-based FlashAttention backward pass.")
 
 
+if triton is not None:
+    @triton.jit
+    def flash_attention_forward_kernel(
+        q_ptr,
+        k_ptr,
+        v_ptr,
+        o_ptr,
+        l_ptr,
+        stride_qb,
+        stride_qq,
+        stride_qd,
+        stride_kb,
+        stride_kk,
+        stride_kd,
+        stride_vb,
+        stride_vk,
+        stride_vd,
+        stride_ob,
+        stride_oq,
+        stride_od,
+        stride_lb,
+        stride_lq,
+        n_queries,
+        n_keys,
+        scale,
+        d: tl.constexpr,
+        q_tile_size: tl.constexpr,
+        k_tile_size: tl.constexpr,
+        is_causal: tl.constexpr,
+    ):
+        query_tile_index = tl.program_id(0)
+        batch_index = tl.program_id(1)
+
+        _ = (
+            q_ptr,
+            k_ptr,
+            v_ptr,
+            o_ptr,
+            l_ptr,
+            stride_qb,
+            stride_qq,
+            stride_qd,
+            stride_kb,
+            stride_kk,
+            stride_kd,
+            stride_vb,
+            stride_vk,
+            stride_vd,
+            stride_ob,
+            stride_oq,
+            stride_od,
+            stride_lb,
+            stride_lq,
+            n_queries,
+            n_keys,
+            scale,
+            d,
+            q_tile_size,
+            k_tile_size,
+            is_causal,
+            query_tile_index,
+            batch_index,
+        )
+
+        # TODO(student): follow handout Algorithm 1 in Triton.
+        # Suggested order:
+        # 1. Build block pointers for the current batch/query tile of Q, O, and L.
+        # 2. Initialize on-chip running buffers for O_i, l_i, and m_i in tl.float32.
+        # 3. Loop over key/value tiles, update online softmax state, and advance pointers.
+        # 4. Normalize the output tile, compute L_i, and store both back to global memory.
+        # 5. When implementing part (c), use is_causal to mask out future keys.
+        pass
+else:
+    flash_attention_forward_kernel = None
+
+
+def _flash_attention_forward_triton(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    q_tile_size: int,
+    k_tile_size: int,
+    is_causal: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    _validate_flash_attention_inputs(q, k, v)
+
+    if triton is None or tl is None or flash_attention_forward_kernel is None:
+        raise RuntimeError("Triton is not available in this environment.")
+    if q.device.type != "cuda":
+        raise ValueError("The Triton FlashAttention forward path requires CUDA tensors.")
+
+    _ = (q, k, v, q_tile_size, k_tile_size, is_causal)
+
+    # TODO(student): allocate output/logsumexp buffers, choose the launch grid, and call
+    # flash_attention_forward_kernel[...] with the correct strides and constexpr tile sizes.
+    raise NotImplementedError("TODO: wire the Triton FlashAttention forward kernel launch.")
+
+
 class FlashAttention2PyTorchFunction(torch.autograd.Function):
     @staticmethod
     def forward(
@@ -186,6 +292,54 @@ class FlashAttention2PyTorchFunction(torch.autograd.Function):
         )
 
         # Tests expect exactly one saved tensor with shape (batch, n_queries), i.e. L.
+        ctx.save_for_backward(logsumexp, q, k, v, output)
+        ctx.is_causal = is_causal
+        ctx.q_tile_size = q_tile_size
+        ctx.k_tile_size = k_tile_size
+        return output
+
+    @staticmethod
+    def backward(
+        ctx,
+        grad_o: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, None]:
+        logsumexp, q, k, v, output = ctx.saved_tensors
+
+        grad_q, grad_k, grad_v = _flash_attention_backward_pytorch_recompute(
+            q,
+            k,
+            v,
+            output,
+            grad_o,
+            logsumexp,
+            is_causal=ctx.is_causal,
+        )
+        return grad_q, grad_k, grad_v, None
+
+
+class FlashAttention2TritonFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        is_causal: bool = False,
+    ) -> torch.Tensor:
+        _validate_flash_attention_inputs(q, k, v)
+
+        q_tile_size = _choose_query_tile_size(q.shape[-2])
+        k_tile_size = _choose_key_tile_size(k.shape[-2])
+
+        output, logsumexp = _flash_attention_forward_triton(
+            q,
+            k,
+            v,
+            q_tile_size=q_tile_size,
+            k_tile_size=k_tile_size,
+            is_causal=is_causal,
+        )
+
         ctx.save_for_backward(logsumexp, q, k, v, output)
         ctx.is_causal = is_causal
         ctx.q_tile_size = q_tile_size
