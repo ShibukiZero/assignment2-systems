@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import torch
+import math
+from torch import einsum, Tensor
+from einops import reduce, rearrange
+from jaxtyping import Float
 
 
 def _validate_flash_attention_inputs(
@@ -88,6 +92,10 @@ def _flash_attention_forward_pytorch_tiled(
     - logsumexp: (batch, n_queries)
     """
     _ = (q, k, v, q_tile_size, k_tile_size, is_causal)
+    _validate_flash_attention_inputs(q, k, v)
+    _choose_query_tile_size(q_tile_size)
+    _choose_key_tile_size(k_tile_size)
+
 
     # Debugging suggestion:
     # compare each intermediate tile update against flash_attention_forward_reference(...)
@@ -105,6 +113,34 @@ def _flash_attention_forward_pytorch_tiled(
     # 5. Normalize the final output tile and write:
     #    - O[:, q_start:q_end, :]
     #    - L[:, q_start:q_end]
+
+    Tq = math.ceil(q.shape[-2] / q_tile_size)
+    Tk = math.ceil(k.shape[-2] / k_tile_size)
+    o: Float[Tensor, '... Bq d'] = torch.zeros_like(q)
+    L: Float[Tensor, '... Bq'] = torch.zeros_like(q[:-1])
+
+    for i in range(Tq):
+        q_tile: Float[Tensor, '... Bq d'] = q[:, i * q_tile_size:(i + 1) * q_tile_size, :]
+        o_tile: Float[Tensor, '... Bq d'] = torch.zeros_like(q_tile)
+        l: Float[Tensor, '... Bq'] = torch.zeros(q_tile.shape[:-1], dtype=q_tile.dtype, device=q_tile.device)
+        m: Float[Tensor, '... Bq'] = torch.full(q_tile.shape[:-1], float("-inf"), dtype=q_tile.dtype, device=q_tile.device)
+
+        for j in range(Tk):
+            k_tile: Float[Tensor, '... Bk d'] = k[:, j * k_tile_size:(j + 1) * k_tile_size, :]
+            v_tile: Float[Tensor, '... Bk d'] = v[:, j * k_tile_size:(j + 1) * k_tile_size, :]
+            s_tile: Float[Tensor, '... Bq Bk'] = einsum('... Bq d, ... Bk d -> ... Bq Bk', q_tile, k_tile) / math.sqrt(q_tile.shape[-1])
+            m_prev = m
+            m: Float[Tensor, '... Bq'] = torch.maximum(m, reduce(s_tile, '... Bq Bk -> ... Bq', 'max'))
+            p_tile: Float[Tensor, '... Bq Bk'] = torch.exp(s_tile - m)
+            l: Float[Tensor, '... Bq'] = torch.exp(m_prev - m) * l + reduce(p_tile, '... Bq Bk -> ... Bq', 'sum')
+            o_tile: Float[Tensor, '... Bq d'] = o_tile * torch.exp(m_prev - m).unsqueeze(-1) + einsum(p_tile, v_tile, '... Bq Bk, ... Bk d -> ... Bq d')
+        o_tile = o_tile / l
+        L_tile = m + torch.log(l)
+        o[:, i * q_tile_size:(i + 1) * q_tile_size, :] = o_tile
+        L[:, i * q_tile_size:(i + 1) * q_tile_size] = L_tile
+
+    return o, L
+
 
     raise NotImplementedError("TODO: implement the pure PyTorch tiled FlashAttention forward pass.")
 
