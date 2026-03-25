@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-import torch
 import math
-from torch import Tensor
+
+import torch
 from einops import reduce, einsum
-from jaxtyping import Float
+
+
+MIN_TILE_SIZE = 16
 
 
 def _validate_flash_attention_inputs(
@@ -28,11 +30,11 @@ def _validate_flash_attention_inputs(
 
 def _choose_query_tile_size(n_queries: int) -> int:
     # Handout guidance: choose tiles at least 16x16 for the tiled implementation.
-    return min(n_queries, 16)
+    return min(n_queries, MIN_TILE_SIZE)
 
 
 def _choose_key_tile_size(n_keys: int) -> int:
-    return min(n_keys, 16)
+    return min(n_keys, MIN_TILE_SIZE)
 
 
 def flash_attention_forward_reference(
@@ -92,56 +94,53 @@ def _flash_attention_forward_pytorch_tiled(
     - logsumexp: (batch, n_queries)
     """
     _validate_flash_attention_inputs(q, k, v)
+    # Handout 1.3.2(a) allows us to ignore causal masking for the pure PyTorch debug path.
     _ = is_causal
 
+    n_queries = q.shape[-2]
+    n_keys = k.shape[-2]
+    scale = q.shape[-1] ** -0.5
+    num_query_tiles = math.ceil(n_queries / q_tile_size)
+    num_key_tiles = math.ceil(n_keys / k_tile_size)
 
-    # Debugging suggestion:
-    # compare each intermediate tile update against flash_attention_forward_reference(...)
-    # on a small input before trusting the full tiled loop.
+    output = torch.zeros_like(q)
+    logsumexp = torch.zeros(q.shape[:-1], dtype=q.dtype, device=q.device)
 
-    # TODO(student): implement Algorithm 1 in pure PyTorch.
-    # Suggested structure:
-    # 1. Loop over query tiles of shape (batch, B_q, d).
-    # 2. For each query tile, initialize:
-    #    - running output O_i^(0) with shape (batch, B_q, d)
-    #    - running row max m_i^(0) with shape (batch, B_q)
-    #    - running denominator proxy l_i^(0) with shape (batch, B_q)
-    # 3. Loop over key/value tiles of shape (batch, B_k, d).
-    # 4. Compute S_i^(j), update m and l online, and accumulate the unnormalized output.
-    # 5. Normalize the final output tile and write:
-    #    - O[:, q_start:q_end, :]
-    #    - L[:, q_start:q_end]
+    for query_tile_idx in range(num_query_tiles):
+        q_start = query_tile_idx * q_tile_size
+        q_end = min((query_tile_idx + 1) * q_tile_size, n_queries)
+        q_tile = q[:, q_start:q_end, :]
 
-    Tq = math.ceil(q.shape[-2] / q_tile_size)
-    Tk = math.ceil(k.shape[-2] / k_tile_size)
-    o: Float[Tensor, '... Bq d'] = torch.zeros_like(q)
-    L: Float[Tensor, '... Bq'] = torch.zeros(q.shape[:-1], dtype=q.dtype, device=q.device)
+        running_output = torch.zeros_like(q_tile)
+        running_l = torch.zeros(q_tile.shape[:-1], dtype=q.dtype, device=q.device)
+        running_m = torch.full(q_tile.shape[:-1], float("-inf"), dtype=q.dtype, device=q.device)
 
-    for i in range(Tq):
-        q_start = i * q_tile_size
-        q_end = (i + 1) * q_tile_size
-        q_tile: Float[Tensor, '... Bq d'] = q[:, q_start:q_end, :]
-        o_tile: Float[Tensor, '... Bq d'] = torch.zeros_like(q_tile)
-        l: Float[Tensor, '... Bq'] = torch.zeros(q_tile.shape[:-1], dtype=q_tile.dtype, device=q_tile.device)
-        m: Float[Tensor, '... Bq'] = torch.full(q_tile.shape[:-1], float("-inf"), dtype=q_tile.dtype, device=q_tile.device)
+        for key_tile_idx in range(num_key_tiles):
+            k_start = key_tile_idx * k_tile_size
+            k_end = min((key_tile_idx + 1) * k_tile_size, n_keys)
+            k_tile = k[:, k_start:k_end, :]
+            v_tile = v[:, k_start:k_end, :]
 
-        for j in range(Tk):
-            k_start = j * k_tile_size
-            k_end = (j + 1) * k_tile_size
-            k_tile: Float[Tensor, '... Bk d'] = k[:, k_start:k_end, :]
-            v_tile: Float[Tensor, '... Bk d'] = v[:, k_start:k_end, :]
-            s_tile: Float[Tensor, '... Bq Bk'] = einsum(q_tile, k_tile, '... Bq d, ... Bk d -> ... Bq Bk') / math.sqrt(q_tile.shape[-1])
-            m_prev = m
-            m: Float[Tensor, '... Bq'] = torch.maximum(m, reduce(s_tile, '... Bq Bk -> ... Bq', 'max'))
-            p_tile: Float[Tensor, '... Bq Bk'] = torch.exp(s_tile - m.unsqueeze(-1))
-            l: Float[Tensor, '... Bq'] = torch.exp(m_prev - m) * l + reduce(p_tile, '... Bq Bk -> ... Bq', 'sum')
-            o_tile: Float[Tensor, '... Bq d'] = o_tile * torch.exp(m_prev - m).unsqueeze(-1) + einsum(p_tile, v_tile, '... Bq Bk, ... Bk d -> ... Bq d')
-        o_tile = o_tile / l.unsqueeze(-1)
-        L_tile = m + torch.log(l)
-        o[:, q_start:q_end, :] = o_tile
-        L[:, q_start:q_end] = L_tile
+            scores_tile = einsum(q_tile, k_tile, "... q d, ... k d -> ... q k") * scale
 
-    return o, L
+            prev_running_m = running_m
+            running_m = torch.maximum(running_m, reduce(scores_tile, "... q k -> ... q", "max"))
+            unnormalized_probs = torch.exp(scores_tile - running_m.unsqueeze(-1))
+            running_l = (
+                torch.exp(prev_running_m - running_m) * running_l
+                + reduce(unnormalized_probs, "... q k -> ... q", "sum")
+            )
+
+            # Rescale the previous partial output before accumulating the new key/value tile.
+            running_output = (
+                running_output * torch.exp(prev_running_m - running_m).unsqueeze(-1)
+                + einsum(unnormalized_probs, v_tile, "... q k, ... k d -> ... q d")
+            )
+
+        output[:, q_start:q_end, :] = running_output / running_l.unsqueeze(-1)
+        logsumexp[:, q_start:q_end] = running_m + torch.log(running_l)
+
+    return output, logsumexp
 
 
 def _flash_attention_backward_pytorch_recompute(
