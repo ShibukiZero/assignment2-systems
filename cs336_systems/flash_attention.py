@@ -44,6 +44,7 @@ def _choose_key_tile_size(n_keys: int) -> int:
     return min(n_keys, MIN_TILE_SIZE)
 
 
+# Forward helpers
 def flash_attention_forward_reference(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -77,94 +78,6 @@ def flash_attention_forward_reference(
     output = torch.matmul(probabilities, v)
     logsumexp = torch.logsumexp(scores, dim=-1)
     return output, logsumexp
-
-
-def _flash_attention_forward_pytorch_tiled(
-    q: torch.Tensor,
-    k: torch.Tensor,
-    v: torch.Tensor,
-    *,
-    q_tile_size: int,
-    k_tile_size: int,
-    is_causal: bool,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Skeleton for Assignment 2, Section 1.3.2(a).
-
-    Expected shapes:
-    - q: (batch, n_queries, d)
-    - k: (batch, n_keys, d)
-    - v: (batch, n_keys, d)
-
-    Returns:
-    - output: (batch, n_queries, d)
-    - logsumexp: (batch, n_queries)
-    """
-    _validate_flash_attention_inputs(q, k, v)
-    # Handout 1.3.2(a) allows us to ignore causal masking for the pure PyTorch debug path.
-    _ = is_causal
-
-    n_queries = q.shape[-2]
-    n_keys = k.shape[-2]
-    scale = q.shape[-1] ** -0.5
-    num_query_tiles = math.ceil(n_queries / q_tile_size)
-    num_key_tiles = math.ceil(n_keys / k_tile_size)
-
-    output = torch.zeros_like(q)
-    logsumexp = torch.zeros(q.shape[:-1], dtype=q.dtype, device=q.device)
-
-    for query_tile_idx in range(num_query_tiles):
-        q_start = query_tile_idx * q_tile_size
-        q_end = min((query_tile_idx + 1) * q_tile_size, n_queries)
-        q_tile = q[:, q_start:q_end, :]
-
-        running_output = torch.zeros_like(q_tile)
-        running_l = torch.zeros(q_tile.shape[:-1], dtype=q.dtype, device=q.device)
-        running_m = torch.full(q_tile.shape[:-1], float("-inf"), dtype=q.dtype, device=q.device)
-
-        for key_tile_idx in range(num_key_tiles):
-            k_start = key_tile_idx * k_tile_size
-            k_end = min((key_tile_idx + 1) * k_tile_size, n_keys)
-            k_tile = k[:, k_start:k_end, :]
-            v_tile = v[:, k_start:k_end, :]
-
-            scores_tile = einsum(q_tile, k_tile, "... q d, ... k d -> ... q k") * scale
-
-            prev_running_m = running_m
-            running_m = torch.maximum(running_m, reduce(scores_tile, "... q k -> ... q", "max"))
-            unnormalized_probs = torch.exp(scores_tile - running_m.unsqueeze(-1))
-            running_l = (
-                torch.exp(prev_running_m - running_m) * running_l
-                + reduce(unnormalized_probs, "... q k -> ... q", "sum")
-            )
-
-            # Rescale the previous partial output before accumulating the new key/value tile.
-            running_output = (
-                running_output * torch.exp(prev_running_m - running_m).unsqueeze(-1)
-                + einsum(unnormalized_probs, v_tile, "... q k, ... k d -> ... q d")
-            )
-
-        output[:, q_start:q_end, :] = running_output / running_l.unsqueeze(-1)
-        logsumexp[:, q_start:q_end] = running_m + torch.log(running_l)
-
-    return output, logsumexp
-
-
-def _flash_attention_backward_pytorch_recompute(
-    q: torch.Tensor,
-    k: torch.Tensor,
-    v: torch.Tensor,
-    o: torch.Tensor,
-    grad_o: torch.Tensor,
-    lse: torch.Tensor,
-    *,
-    is_causal: bool,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    _ = (q, k, v, o, grad_o, lse, is_causal)
-
-    # TODO(student): implement Section 1.3.2 flash_backward using Eqs. (13)-(19).
-    # Hint: compute D = rowsum(O * dO), then recompute P from S and L.
-    raise NotImplementedError("TODO: implement the recomputation-based FlashAttention backward pass.")
 
 
 if triton is not None:
@@ -243,6 +156,77 @@ else:
     flash_attention_forward_kernel = None
 
 
+def _flash_attention_forward_pytorch_tiled(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    *,
+    q_tile_size: int,
+    k_tile_size: int,
+    is_causal: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Skeleton for Assignment 2, Section 1.3.2(a).
+
+    Expected shapes:
+    - q: (batch, n_queries, d)
+    - k: (batch, n_keys, d)
+    - v: (batch, n_keys, d)
+
+    Returns:
+    - output: (batch, n_queries, d)
+    - logsumexp: (batch, n_queries)
+    """
+    _validate_flash_attention_inputs(q, k, v)
+    # Handout 1.3.2(a) allows us to ignore causal masking for the pure PyTorch debug path.
+    _ = is_causal
+
+    n_queries = q.shape[-2]
+    n_keys = k.shape[-2]
+    scale = q.shape[-1] ** -0.5
+    num_query_tiles = math.ceil(n_queries / q_tile_size)
+    num_key_tiles = math.ceil(n_keys / k_tile_size)
+
+    output = torch.zeros_like(q)
+    logsumexp = torch.zeros(q.shape[:-1], dtype=q.dtype, device=q.device)
+
+    for query_tile_idx in range(num_query_tiles):
+        q_start = query_tile_idx * q_tile_size
+        q_end = min((query_tile_idx + 1) * q_tile_size, n_queries)
+        q_tile = q[:, q_start:q_end, :]
+
+        running_output = torch.zeros_like(q_tile)
+        running_l = torch.zeros(q_tile.shape[:-1], dtype=q.dtype, device=q.device)
+        running_m = torch.full(q_tile.shape[:-1], float("-inf"), dtype=q.dtype, device=q.device)
+
+        for key_tile_idx in range(num_key_tiles):
+            k_start = key_tile_idx * k_tile_size
+            k_end = min((key_tile_idx + 1) * k_tile_size, n_keys)
+            k_tile = k[:, k_start:k_end, :]
+            v_tile = v[:, k_start:k_end, :]
+
+            scores_tile = einsum(q_tile, k_tile, "... q d, ... k d -> ... q k") * scale
+
+            prev_running_m = running_m
+            running_m = torch.maximum(running_m, reduce(scores_tile, "... q k -> ... q", "max"))
+            unnormalized_probs = torch.exp(scores_tile - running_m.unsqueeze(-1))
+            running_l = (
+                torch.exp(prev_running_m - running_m) * running_l
+                + reduce(unnormalized_probs, "... q k -> ... q", "sum")
+            )
+
+            # Rescale the previous partial output before accumulating the new key/value tile.
+            running_output = (
+                running_output * torch.exp(prev_running_m - running_m).unsqueeze(-1)
+                + einsum(unnormalized_probs, v_tile, "... q k, ... k d -> ... q d")
+            )
+
+        output[:, q_start:q_end, :] = running_output / running_l.unsqueeze(-1)
+        logsumexp[:, q_start:q_end] = running_m + torch.log(running_l)
+
+    return output, logsumexp
+
+
 def _flash_attention_forward_triton(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -264,6 +248,24 @@ def _flash_attention_forward_triton(
     # TODO(student): allocate output/logsumexp buffers, choose the launch grid, and call
     # flash_attention_forward_kernel[...] with the correct strides and constexpr tile sizes.
     raise NotImplementedError("TODO: wire the Triton FlashAttention forward kernel launch.")
+
+
+# Backward helpers
+def _flash_attention_backward_pytorch_recompute(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    o: torch.Tensor,
+    grad_o: torch.Tensor,
+    lse: torch.Tensor,
+    *,
+    is_causal: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    _ = (q, k, v, o, grad_o, lse, is_causal)
+
+    # TODO(student): implement Section 1.3.2 flash_backward using Eqs. (13)-(19).
+    # Hint: compute D = rowsum(O * dO), then recompute P from S and L.
+    raise NotImplementedError("TODO: implement the recomputation-based FlashAttention backward pass.")
 
 
 class FlashAttention2PyTorchFunction(torch.autograd.Function):
