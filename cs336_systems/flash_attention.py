@@ -83,67 +83,18 @@ def flash_attention_forward_reference(
 if triton is not None:
     @triton.jit
     def flash_attention_forward_kernel(
-        q_ptr,
-        k_ptr,
-        v_ptr,
-        o_ptr,
-        l_ptr,
-        stride_qb,
-        stride_qq,
-        stride_qd,
-        stride_kb,
-        stride_kk,
-        stride_kd,
-        stride_vb,
-        stride_vk,
-        stride_vd,
-        stride_ob,
-        stride_oq,
-        stride_od,
-        stride_lb,
-        stride_lq,
-        n_queries,
-        n_keys,
-        scale,
-        d: tl.constexpr,
-        q_tile_size: tl.constexpr,
-        k_tile_size: tl.constexpr,
-        is_causal: tl.constexpr,
+        q_ptr, k_ptr, v_ptr, o_ptr, l_ptr,
+        stride_qb, stride_qq, stride_qd,
+        stride_kb, stride_kk, stride_kd,
+        stride_vb, stride_vk, stride_vd,
+        stride_ob, stride_oq, stride_od,
+        stride_lb, stride_lq,
+        N_QUERIES, N_KEYS, scale,
+        D: tl.constexpr,
+        Q_TILE_SIZE: tl.constexpr,
+        K_TILE_SIZE: tl.constexpr,
+        IS_CAUSAL: tl.constexpr,
     ):
-        query_tile_index = tl.program_id(0)
-        batch_index = tl.program_id(1)
-
-        _ = (
-            q_ptr,
-            k_ptr,
-            v_ptr,
-            o_ptr,
-            l_ptr,
-            stride_qb,
-            stride_qq,
-            stride_qd,
-            stride_kb,
-            stride_kk,
-            stride_kd,
-            stride_vb,
-            stride_vk,
-            stride_vd,
-            stride_ob,
-            stride_oq,
-            stride_od,
-            stride_lb,
-            stride_lq,
-            n_queries,
-            n_keys,
-            scale,
-            d,
-            q_tile_size,
-            k_tile_size,
-            is_causal,
-            query_tile_index,
-            batch_index,
-        )
-
         # TODO(student): follow handout Algorithm 1 in Triton.
         # Suggested order:
         # 1. Build block pointers for the current batch/query tile of Q, O, and L.
@@ -151,7 +102,55 @@ if triton is not None:
         # 3. Loop over key/value tiles, update online softmax state, and advance pointers.
         # 4. Normalize the output tile, compute L_i, and store both back to global memory.
         # 5. When implementing part (c), use is_causal to mask out future keys.
-        pass
+
+        # Program Indices
+        query_tile_index = tl.program_id(0)
+        batch_index = tl.program_id(1)
+
+        # Offset each pointer with the corresponding batch index
+        # multiplied with the batch stride for each tensor
+        Q_block_ptr = tl.make_block_ptr(
+            base=q_ptr + batch_index * stride_qb,
+            shape=(N_QUERIES, D),
+            strides=(stride_qq, stride_qd),
+            offsets=(query_tile_index * Q_TILE_SIZE, 0),
+            block_shape=(Q_TILE_SIZE, D),
+            order=(1, 0),
+        )
+        K_block_ptr = tl.make_block_ptr(
+            base=k_ptr + batch_index * stride_kb,
+            shape=(N_KEYS, D),
+            strides=(stride_kk, stride_kd),
+            offsets=(query_tile_index * Q_TILE_SIZE, 0),
+            block_shape=(K_TILE_SIZE, D),
+            order=(1, 0),
+        )
+        V_block_ptr = tl.make_block_ptr(
+            base=v_ptr + batch_index * stride_vb,
+            shape=(N_KEYS, D),
+            strides=(stride_vk, stride_vd),
+            offsets=(query_tile_index * Q_TILE_SIZE, 0),
+            block_shape=(K_TILE_SIZE, D),
+            order=(1, 0),
+        )
+        O_block_ptr = tl.make_block_ptr(
+            base=o_ptr + batch_index * stride_ob,
+            shape=(N_QUERIES, D),
+            strides=(stride_oq, stride_od),
+            offsets=(query_tile_index * Q_TILE_SIZE, 0),
+            block_shape=(Q_TILE_SIZE, D),
+            order=(1, 0),
+        )
+        L_block_ptr = tl.make_block_ptr(
+            base=l_ptr + batch_index * stride_lb,
+            shape=(N_QUERIES,),
+            strides=(stride_lb, stride_lq),
+            offsets=(query_tile_index * Q_TILE_SIZE, 0),
+            block_shape=(Q_TILE_SIZE, ),
+            order=(1, 0),
+        )
+
+
 else:
     flash_attention_forward_kernel = None
 
