@@ -149,14 +149,14 @@ if triton is not None:
             block_shape=(Q_TILE_SIZE, ),
             order=(0, ),
         )
-        Q_tile = tl.load(Q_block_ptr, boundary_check=(0, 1), padding_options="zero")
+        Q_tile = tl.load(Q_block_ptr, boundary_check=(0, 1), padding_option="zero")
         O_tile = tl.zeros((Q_TILE_SIZE, D), dtype=tl.float32)
         running_l = tl.zeros((Q_TILE_SIZE,), dtype=tl.float32)
         running_m = tl.full((Q_TILE_SIZE,), float("-inf"), dtype=tl.float32)
 
         for _ in range(tl.cdiv(N_KEYS, K_TILE_SIZE)):
-            K_tile = tl.load(K_block_ptr, boundary_check=(0, 1), padding_options="zero")
-            V_tile = tl.load(V_block_ptr, boundary_check=(0, 1), padding_options="zero")
+            K_tile = tl.load(K_block_ptr, boundary_check=(0, 1), padding_option="zero")
+            V_tile = tl.load(V_block_ptr, boundary_check=(0, 1), padding_option="zero")
 
             S_tile = tl.dot(Q_tile, tl.trans(K_tile)) * scale
             prev_running_m = running_m
@@ -170,7 +170,7 @@ if triton is not None:
         O_tile = O_tile / running_l[:, None]
         L_tile = running_m + tl.log(running_l)
         tl.store(O_block_ptr, O_tile, boundary_check=(0, 1))
-        tl.store(L_block_ptr, L_tile, boundary_check=(0, 1))
+        tl.store(L_block_ptr, L_tile, boundary_check=(0, ))
 
 else:
     flash_attention_forward_kernel = None
@@ -263,11 +263,27 @@ def _flash_attention_forward_triton(
     if q.device.type != "cuda":
         raise ValueError("The Triton FlashAttention forward path requires CUDA tensors.")
 
-    _ = (q, k, v, q_tile_size, k_tile_size, is_causal)
+    batch_size, n_queries, d = q.shape
+    n_keys = k.shape[-2]
+    scale = q.shape[-1] ** -0.5
+    output = torch.empty_like(q)
+    logsumexp = torch.empty((batch_size, n_queries), dtype=torch.float32, device=q.device)
+    grid = (triton.cdiv(n_queries, q_tile_size), batch_size)
 
-    # TODO(student): allocate output/logsumexp buffers, choose the launch grid, and call
-    # flash_attention_forward_kernel[...] with the correct strides and constexpr tile sizes.
-    raise NotImplementedError("TODO: wire the Triton FlashAttention forward kernel launch.")
+    flash_attention_forward_kernel[grid](
+        q, k, v, output, logsumexp,
+        q.stride(0), q.stride(1), q.stride(2),
+        k.stride(0), k.stride(1), k.stride(2),
+        v.stride(0), v.stride(1), v.stride(2),
+        output.stride(0), output.stride(1), output.stride(2),
+        logsumexp.stride(0), logsumexp.stride(1),
+        n_queries, n_keys, scale,
+        D=d,
+        Q_TILE_SIZE=q_tile_size,
+        K_TILE_SIZE=k_tile_size,
+        IS_CAUSAL=is_causal,
+    )
+    return output, logsumexp
 
 
 # Backward helpers
