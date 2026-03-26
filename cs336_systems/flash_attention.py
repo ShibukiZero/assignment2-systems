@@ -152,16 +152,16 @@ if triton is not None:
             running_m = tl.maximum(running_m, tl.max(scores_tile, axis=1))
             unnormalized_probs = tl.exp(scores_tile - running_m[:, None])
             running_l = tl.exp(prev_running_m - running_m) * running_l + tl.sum(unnormalized_probs, axis=1)
-            output_tile = (
-                output_tile * tl.exp(prev_running_m - running_m)[:, None]
-                + tl.dot(unnormalized_probs, v_tile)
-            )
+            output_tile = output_tile * tl.exp(prev_running_m - running_m)[:, None]
+            probs_for_value = unnormalized_probs.to(v_tile.dtype)
+            output_tile = tl.dot(probs_for_value, v_tile, acc=output_tile)
 
             k_block_ptr = tl.advance(k_block_ptr, (K_TILE_SIZE, 0))
             v_block_ptr = tl.advance(v_block_ptr, (K_TILE_SIZE, 0))
         output_tile = output_tile / running_l[:, None]
         logsumexp_tile = running_m + tl.log(running_l)
-        tl.store(o_block_ptr, output_tile, boundary_check=(0, 1))
+        output_to_store = output_tile.to(o_block_ptr.type.element_ty)
+        tl.store(o_block_ptr, output_to_store, boundary_check=(0, 1))
         tl.store(l_block_ptr, logsumexp_tile, boundary_check=(0,))
 
 else:
