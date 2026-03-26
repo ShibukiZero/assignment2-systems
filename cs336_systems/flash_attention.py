@@ -121,7 +121,7 @@ if triton is not None:
             base=k_ptr + batch_index * stride_kb,
             shape=(N_KEYS, D),
             strides=(stride_kk, stride_kd),
-            offsets=(query_tile_index * Q_TILE_SIZE, 0),
+            offsets=(0, 0),
             block_shape=(K_TILE_SIZE, D),
             order=(1, 0),
         )
@@ -129,7 +129,7 @@ if triton is not None:
             base=v_ptr + batch_index * stride_vb,
             shape=(N_KEYS, D),
             strides=(stride_vk, stride_vd),
-            offsets=(query_tile_index * Q_TILE_SIZE, 0),
+            offsets=(0, 0),
             block_shape=(K_TILE_SIZE, D),
             order=(1, 0),
         )
@@ -144,12 +144,33 @@ if triton is not None:
         L_block_ptr = tl.make_block_ptr(
             base=l_ptr + batch_index * stride_lb,
             shape=(N_QUERIES,),
-            strides=(stride_lb, stride_lq),
-            offsets=(query_tile_index * Q_TILE_SIZE, 0),
+            strides=(stride_lq, ),
+            offsets=(query_tile_index * Q_TILE_SIZE, ),
             block_shape=(Q_TILE_SIZE, ),
-            order=(1, 0),
+            order=(0, ),
         )
+        Q_tile = tl.load(Q_block_ptr, boundary_check=(0, 1), padding_options="zero")
+        O_tile = tl.zeros((Q_TILE_SIZE, D), dtype=tl.float32)
+        running_l = tl.zeros((Q_TILE_SIZE,), dtype=tl.float32)
+        running_m = tl.full((Q_TILE_SIZE,), float("-inf"), dtype=tl.float32)
 
+        for _ in range(tl.cdiv(N_KEYS, K_TILE_SIZE)):
+            K_tile = tl.load(K_block_ptr, boundary_check=(0, 1), padding_options="zero")
+            V_tile = tl.load(V_block_ptr, boundary_check=(0, 1), padding_options="zero")
+
+            S_tile = tl.dot(Q_tile, tl.trans(K_tile)) * scale
+            prev_running_m = running_m
+            running_m = tl.maximum(running_m, tl.max(S_tile, 1))
+            P_tile = tl.exp(S_tile - running_m[:, None])
+            running_l = tl.exp(prev_running_m - running_m) * running_l + tl.sum(P_tile, 1)
+            O_tile = O_tile * tl.exp(prev_running_m - running_m)[:, None] + tl.dot(P_tile, V_tile)
+
+            K_block_ptr = tl.advance(K_block_ptr, (K_TILE_SIZE, 0))
+            V_block_ptr = tl.advance(V_block_ptr, (K_TILE_SIZE, 0))
+        O_tile = O_tile / running_l[:, None]
+        L_tile = running_m + tl.log(running_l)
+        tl.store(O_block_ptr, O_tile, boundary_check=(0, 1))
+        tl.store(L_block_ptr, L_tile, boundary_check=(0, 1))
 
 else:
     flash_attention_forward_kernel = None
