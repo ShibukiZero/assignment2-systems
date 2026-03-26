@@ -151,6 +151,7 @@ if triton is not None:
             prev_running_m = running_m
             running_m = tl.maximum(running_m, tl.max(scores_tile, axis=1))
             unnormalized_probs = tl.exp(scores_tile - running_m[:, None])
+            
             running_l = tl.exp(prev_running_m - running_m) * running_l + tl.sum(unnormalized_probs, axis=1)
             output_tile = output_tile * tl.exp(prev_running_m - running_m)[:, None]
             probs_for_value = unnormalized_probs.to(v_tile.dtype)
@@ -190,8 +191,6 @@ def _flash_attention_forward_pytorch_tiled(
     - logsumexp: (batch, n_queries)
     """
     _validate_flash_attention_inputs(q, k, v)
-    # Handout 1.3.2(a) allows the PyTorch debug path to ignore causal masking.
-    _ = is_causal
 
     n_queries = q.shape[-2]
     n_keys = k.shape[-2]
@@ -218,6 +217,15 @@ def _flash_attention_forward_pytorch_tiled(
             v_tile = v[:, k_start:k_end, :]
 
             scores_tile = einsum(q_tile, k_tile, "... q d, ... k d -> ... q k") * scale
+            if is_causal:
+                query_positions = torch.arange(q_start, q_end, device=q.device)
+                key_positions = torch.arange(k_start, k_end, device=q.device)
+                causal_mask = query_positions[:, None] >= key_positions[None, :]
+                scores_tile = torch.where(
+                    causal_mask.unsqueeze(0),
+                    scores_tile,
+                    scores_tile.new_full((), -1e6),
+                )
 
             prev_running_m = running_m
             running_m = torch.maximum(running_m, reduce(scores_tile, "... q k -> ... q", "max"))
