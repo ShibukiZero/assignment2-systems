@@ -296,6 +296,32 @@ def _flash_attention_forward_triton(
 
 
 # Backward helpers
+def _flash_attention_backward_reference(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    grad_o: torch.Tensor,
+    *,
+    is_causal: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    with torch.enable_grad():
+        q_ref = q.detach().requires_grad_(True)
+        k_ref = k.detach().requires_grad_(True)
+        v_ref = v.detach().requires_grad_(True)
+        output_ref, _ = flash_attention_forward_reference(
+            q_ref,
+            k_ref,
+            v_ref,
+            is_causal=is_causal,
+        )
+        grad_q, grad_k, grad_v = torch.autograd.grad(
+            outputs=output_ref,
+            inputs=(q_ref, k_ref, v_ref),
+            grad_outputs=grad_o,
+        )
+    return grad_q, grad_k, grad_v
+
+
 def _flash_attention_backward_pytorch_recompute(
     q: torch.Tensor,
     k: torch.Tensor,
