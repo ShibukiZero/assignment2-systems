@@ -142,16 +142,22 @@ if triton is not None:
         output_tile = tl.zeros((Q_TILE_SIZE, D), dtype=tl.float32)
         running_l = tl.zeros((Q_TILE_SIZE,), dtype=tl.float32)
         running_m = tl.full((Q_TILE_SIZE,), float("-inf"), dtype=tl.float32)
+        query_offsets = query_tile_index * Q_TILE_SIZE + tl.arange(0, Q_TILE_SIZE)
 
-        for _ in range(tl.cdiv(N_KEYS, K_TILE_SIZE)):
+        for key_tile_index in range(tl.cdiv(N_KEYS, K_TILE_SIZE)):
             k_tile = tl.load(k_block_ptr, boundary_check=(0, 1), padding_option="zero")
             v_tile = tl.load(v_block_ptr, boundary_check=(0, 1), padding_option="zero")
+            key_offsets = key_tile_index * K_TILE_SIZE + tl.arange(0, K_TILE_SIZE)
 
             scores_tile = tl.dot(q_tile, tl.trans(k_tile)) * scale
             prev_running_m = running_m
             running_m = tl.maximum(running_m, tl.max(scores_tile, axis=1))
             unnormalized_probs = tl.exp(scores_tile - running_m[:, None])
-            
+
+            if IS_CAUSAL:
+                causal_mask = query_offsets[:, None] >= key_offsets[None, :]
+                scores_tile = tl.where(causal_mask, scores_tile, -1e6)
+
             running_l = tl.exp(prev_running_m - running_m) * running_l + tl.sum(unnormalized_probs, axis=1)
             output_tile = output_tile * tl.exp(prev_running_m - running_m)[:, None]
             probs_for_value = unnormalized_probs.to(v_tile.dtype)
