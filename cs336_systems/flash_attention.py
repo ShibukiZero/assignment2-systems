@@ -150,14 +150,17 @@ if triton is not None:
             key_offsets = key_tile_index * K_TILE_SIZE + tl.arange(0, K_TILE_SIZE)
 
             scores_tile = tl.dot(q_tile, tl.trans(k_tile)) * scale
+            valid_key_mask = key_offsets[None, :] < N_KEYS
+            if IS_CAUSAL:
+                causal_mask = query_offsets[:, None] >= key_offsets[None, :]
+                score_mask = causal_mask & valid_key_mask
+            else:
+                score_mask = valid_key_mask
+            scores_tile = tl.where(score_mask, scores_tile, -1e6)
+
             prev_running_m = running_m
             running_m = tl.maximum(running_m, tl.max(scores_tile, axis=1))
             unnormalized_probs = tl.exp(scores_tile - running_m[:, None])
-
-            if IS_CAUSAL:
-                causal_mask = query_offsets[:, None] >= key_offsets[None, :]
-                scores_tile = tl.where(causal_mask, scores_tile, -1e6)
-
             running_l = tl.exp(prev_running_m - running_m) * running_l + tl.sum(unnormalized_probs, axis=1)
             output_tile = output_tile * tl.exp(prev_running_m - running_m)[:, None]
             probs_for_value = unnormalized_probs.to(v_tile.dtype)
