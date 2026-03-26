@@ -95,21 +95,10 @@ if triton is not None:
         K_TILE_SIZE: tl.constexpr,
         IS_CAUSAL: tl.constexpr,
     ):
-        # TODO(student): follow handout Algorithm 1 in Triton.
-        # Suggested order:
-        # 1. Build block pointers for the current batch/query tile of Q, O, and L.
-        # 2. Initialize on-chip running buffers for O_i, l_i, and m_i in tl.float32.
-        # 3. Loop over key/value tiles, update online softmax state, and advance pointers.
-        # 4. Normalize the output tile, compute L_i, and store both back to global memory.
-        # 5. When implementing part (c), use is_causal to mask out future keys.
-
-        # Program Indices
         query_tile_index = tl.program_id(0)
         batch_index = tl.program_id(1)
 
-        # Offset each pointer with the corresponding batch index
-        # multiplied with the batch stride for each tensor
-        Q_block_ptr = tl.make_block_ptr(
+        q_block_ptr = tl.make_block_ptr(
             base=q_ptr + batch_index * stride_qb,
             shape=(N_QUERIES, D),
             strides=(stride_qq, stride_qd),
@@ -117,7 +106,7 @@ if triton is not None:
             block_shape=(Q_TILE_SIZE, D),
             order=(1, 0),
         )
-        K_block_ptr = tl.make_block_ptr(
+        k_block_ptr = tl.make_block_ptr(
             base=k_ptr + batch_index * stride_kb,
             shape=(N_KEYS, D),
             strides=(stride_kk, stride_kd),
@@ -125,7 +114,7 @@ if triton is not None:
             block_shape=(K_TILE_SIZE, D),
             order=(1, 0),
         )
-        V_block_ptr = tl.make_block_ptr(
+        v_block_ptr = tl.make_block_ptr(
             base=v_ptr + batch_index * stride_vb,
             shape=(N_KEYS, D),
             strides=(stride_vk, stride_vd),
@@ -133,7 +122,7 @@ if triton is not None:
             block_shape=(K_TILE_SIZE, D),
             order=(1, 0),
         )
-        O_block_ptr = tl.make_block_ptr(
+        o_block_ptr = tl.make_block_ptr(
             base=o_ptr + batch_index * stride_ob,
             shape=(N_QUERIES, D),
             strides=(stride_oq, stride_od),
@@ -141,36 +130,39 @@ if triton is not None:
             block_shape=(Q_TILE_SIZE, D),
             order=(1, 0),
         )
-        L_block_ptr = tl.make_block_ptr(
+        l_block_ptr = tl.make_block_ptr(
             base=l_ptr + batch_index * stride_lb,
             shape=(N_QUERIES,),
-            strides=(stride_lq, ),
-            offsets=(query_tile_index * Q_TILE_SIZE, ),
-            block_shape=(Q_TILE_SIZE, ),
-            order=(0, ),
+            strides=(stride_lq,),
+            offsets=(query_tile_index * Q_TILE_SIZE,),
+            block_shape=(Q_TILE_SIZE,),
+            order=(0,),
         )
-        Q_tile = tl.load(Q_block_ptr, boundary_check=(0, 1), padding_option="zero")
-        O_tile = tl.zeros((Q_TILE_SIZE, D), dtype=tl.float32)
+        q_tile = tl.load(q_block_ptr, boundary_check=(0, 1), padding_option="zero")
+        output_tile = tl.zeros((Q_TILE_SIZE, D), dtype=tl.float32)
         running_l = tl.zeros((Q_TILE_SIZE,), dtype=tl.float32)
         running_m = tl.full((Q_TILE_SIZE,), float("-inf"), dtype=tl.float32)
 
         for _ in range(tl.cdiv(N_KEYS, K_TILE_SIZE)):
-            K_tile = tl.load(K_block_ptr, boundary_check=(0, 1), padding_option="zero")
-            V_tile = tl.load(V_block_ptr, boundary_check=(0, 1), padding_option="zero")
+            k_tile = tl.load(k_block_ptr, boundary_check=(0, 1), padding_option="zero")
+            v_tile = tl.load(v_block_ptr, boundary_check=(0, 1), padding_option="zero")
 
-            S_tile = tl.dot(Q_tile, tl.trans(K_tile)) * scale
+            scores_tile = tl.dot(q_tile, tl.trans(k_tile)) * scale
             prev_running_m = running_m
-            running_m = tl.maximum(running_m, tl.max(S_tile, 1))
-            P_tile = tl.exp(S_tile - running_m[:, None])
-            running_l = tl.exp(prev_running_m - running_m) * running_l + tl.sum(P_tile, 1)
-            O_tile = O_tile * tl.exp(prev_running_m - running_m)[:, None] + tl.dot(P_tile, V_tile)
+            running_m = tl.maximum(running_m, tl.max(scores_tile, axis=1))
+            unnormalized_probs = tl.exp(scores_tile - running_m[:, None])
+            running_l = tl.exp(prev_running_m - running_m) * running_l + tl.sum(unnormalized_probs, axis=1)
+            output_tile = (
+                output_tile * tl.exp(prev_running_m - running_m)[:, None]
+                + tl.dot(unnormalized_probs, v_tile)
+            )
 
-            K_block_ptr = tl.advance(K_block_ptr, (K_TILE_SIZE, 0))
-            V_block_ptr = tl.advance(V_block_ptr, (K_TILE_SIZE, 0))
-        O_tile = O_tile / running_l[:, None]
-        L_tile = running_m + tl.log(running_l)
-        tl.store(O_block_ptr, O_tile, boundary_check=(0, 1))
-        tl.store(L_block_ptr, L_tile, boundary_check=(0, ))
+            k_block_ptr = tl.advance(k_block_ptr, (K_TILE_SIZE, 0))
+            v_block_ptr = tl.advance(v_block_ptr, (K_TILE_SIZE, 0))
+        output_tile = output_tile / running_l[:, None]
+        logsumexp_tile = running_m + tl.log(running_l)
+        tl.store(o_block_ptr, output_tile, boundary_check=(0, 1))
+        tl.store(l_block_ptr, logsumexp_tile, boundary_check=(0,))
 
 else:
     flash_attention_forward_kernel = None
@@ -186,7 +178,7 @@ def _flash_attention_forward_pytorch_tiled(
     is_causal: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    Skeleton for Assignment 2, Section 1.3.2(a).
+    Pure PyTorch tiled forward pass used to debug the Triton kernel.
 
     Expected shapes:
     - q: (batch, n_queries, d)
@@ -198,7 +190,7 @@ def _flash_attention_forward_pytorch_tiled(
     - logsumexp: (batch, n_queries)
     """
     _validate_flash_attention_inputs(q, k, v)
-    # Handout 1.3.2(a) allows us to ignore causal masking for the pure PyTorch debug path.
+    # Handout 1.3.2(a) allows the PyTorch debug path to ignore causal masking.
     _ = is_causal
 
     n_queries = q.shape[-2]
@@ -299,8 +291,7 @@ def _flash_attention_backward_pytorch_recompute(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     _ = (q, k, v, o, grad_o, lse, is_causal)
 
-    # TODO(student): implement Section 1.3.2 flash_backward using Eqs. (13)-(19).
-    # Hint: compute D = rowsum(O * dO), then recompute P from S and L.
+    # TODO: implement Section 1.3.2 backward with recomputation.
     raise NotImplementedError("TODO: implement the recomputation-based FlashAttention backward pass.")
 
 
@@ -318,8 +309,6 @@ class FlashAttention2PyTorchFunction(torch.autograd.Function):
         q_tile_size = _choose_query_tile_size(q.shape[-2])
         k_tile_size = _choose_key_tile_size(k.shape[-2])
 
-        # TODO(student): if you want easier debugging, start with explicit q_start/q_end
-        # and k_start/k_end boundaries before worrying about helper abstractions.
         output, logsumexp = _flash_attention_forward_pytorch_tiled(
             q,
             k,
