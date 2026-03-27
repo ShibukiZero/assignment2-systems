@@ -335,7 +335,17 @@ def _flash_attention_backward_pytorch_recompute(
     _ = (q, k, v, o, grad_o, lse, is_causal)
 
     # TODO: implement Section 1.3.2 backward with recomputation.
-    raise NotImplementedError("TODO: implement the recomputation-based FlashAttention backward pass.")
+    D = reduce(grad_o * o, '... q d -> ... q', 'sum')
+    S = einsum(q, k, '... q d, ... k d -> ... q k') * q.shape[-1] ** -0.5
+    P = torch.exp(S - lse.unsqueeze(-1))
+    dV = einsum(P, grad_o, '... q k, ... q d -> ... k d')
+    dP = einsum(grad_o, v, '... q d, ... k d -> ... q k')
+    dS = P *(dP - D.unsqueeze(-1))
+    dQ = einsum(dS, k, '... q k, ... k d -> ... q d') * q.shape[-1] ** -0.5
+    dK = einsum(dS, q, '... q k, ... q d -> ... k d') * q.shape[-1] ** -0.5
+    return dQ, dK, dV
+
+    # raise NotImplementedError("TODO: implement the recomputation-based FlashAttention backward pass.")
 
 
 class FlashAttention2PyTorchFunction(torch.autograd.Function):
