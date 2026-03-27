@@ -3,6 +3,7 @@
 Source: `.agents/logs/flash_benchmark/results.json`
 
 Setup:
+- hardware: `single NVIDIA H800`
 - batch size: `1`
 - causal masking: `True`
 - query tile size: `16`
