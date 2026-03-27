@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import math
+from contextlib import contextmanager
 
 import torch
 from einops import reduce, einsum
@@ -15,6 +16,44 @@ except ImportError:  # pragma: no cover - Triton is only required on CUDA hosts.
 
 
 MIN_TILE_SIZE = 16
+_FLASH_ATTENTION_TILE_SIZE_OVERRIDE: tuple[int | None, int | None] | None = None
+
+
+def _resolve_tile_size_override(
+    requested_tile_size: int | None,
+    *,
+    n_tokens: int,
+    axis_name: str,
+) -> int | None:
+    if requested_tile_size is None:
+        return None
+    if requested_tile_size < MIN_TILE_SIZE:
+        raise ValueError(
+            f"Expected {axis_name} tile size to be at least {MIN_TILE_SIZE}, "
+            f"but got {requested_tile_size}."
+        )
+    return min(n_tokens, requested_tile_size)
+
+
+@contextmanager
+def flash_attention_tile_size_override(
+    *,
+    q_tile_size: int | None = None,
+    k_tile_size: int | None = None,
+):
+    """
+    Temporarily override the tile sizes used by FlashAttention helpers.
+
+    This is intended for benchmark sweeps, while keeping the public
+    autograd.Function interface unchanged for the assignment tests.
+    """
+    global _FLASH_ATTENTION_TILE_SIZE_OVERRIDE
+    previous_override = _FLASH_ATTENTION_TILE_SIZE_OVERRIDE
+    _FLASH_ATTENTION_TILE_SIZE_OVERRIDE = (q_tile_size, k_tile_size)
+    try:
+        yield
+    finally:
+        _FLASH_ATTENTION_TILE_SIZE_OVERRIDE = previous_override
 
 
 def _validate_flash_attention_inputs(
@@ -38,10 +77,28 @@ def _validate_flash_attention_inputs(
 
 def _choose_query_tile_size(n_queries: int) -> int:
     # Handout guidance: choose tiles at least 16x16 for the tiled implementation.
+    if _FLASH_ATTENTION_TILE_SIZE_OVERRIDE is not None:
+        q_tile_size, _ = _FLASH_ATTENTION_TILE_SIZE_OVERRIDE
+        overridden_tile_size = _resolve_tile_size_override(
+            q_tile_size,
+            n_tokens=n_queries,
+            axis_name="query",
+        )
+        if overridden_tile_size is not None:
+            return overridden_tile_size
     return min(n_queries, MIN_TILE_SIZE)
 
 
 def _choose_key_tile_size(n_keys: int) -> int:
+    if _FLASH_ATTENTION_TILE_SIZE_OVERRIDE is not None:
+        _, k_tile_size = _FLASH_ATTENTION_TILE_SIZE_OVERRIDE
+        overridden_tile_size = _resolve_tile_size_override(
+            k_tile_size,
+            n_tokens=n_keys,
+            axis_name="key",
+        )
+        if overridden_tile_size is not None:
+            return overridden_tile_size
     return min(n_keys, MIN_TILE_SIZE)
 
 
