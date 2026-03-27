@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import math
 
 import torch
@@ -322,7 +323,7 @@ def _flash_attention_backward_reference(
     return grad_q, grad_k, grad_v
 
 
-def _flash_attention_backward_pytorch_recompute(
+def _flash_attention_backward_pytorch_recompute_impl(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -349,6 +350,36 @@ def _flash_attention_backward_pytorch_recompute(
     grad_q = einsum(grad_s, k, '... q k, ... k d -> ... q d') * scale
     grad_k = einsum(grad_s, q, '... q k, ... q d -> ... k d') * scale
     return grad_q, grad_k, grad_v
+
+
+@functools.lru_cache(maxsize=1)
+def _get_compiled_flash_attention_backward():
+    compile_fn = getattr(torch, "compile", None)
+    if compile_fn is None:
+        return _flash_attention_backward_pytorch_recompute_impl
+    return compile_fn(_flash_attention_backward_pytorch_recompute_impl)
+
+
+def _flash_attention_backward_pytorch_recompute(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    o: torch.Tensor,
+    grad_o: torch.Tensor,
+    lse: torch.Tensor,
+    *,
+    is_causal: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    compiled_backward = _get_compiled_flash_attention_backward()
+    return compiled_backward(
+        q,
+        k,
+        v,
+        o,
+        grad_o,
+        lse,
+        is_causal=is_causal,
+    )
 
 
 class FlashAttention2PyTorchFunction(torch.autograd.Function):
