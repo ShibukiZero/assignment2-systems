@@ -321,8 +321,118 @@ if triton is not None:
         batch_index = tl.program_id(1)
 
         # TODO(student): replace this placeholder body with the tiled dK/dV kernel.
+        #
+        # Recommended flow for this pass:
+        # 1. Let this program instance own exactly one (batch, key_tile) output tile.
+        #    That means only this block should write the corresponding grad_k / grad_v tile.
+        # 2. Load the current K_j and V_j tile once, and initialize fp32 accumulators
+        #    for grad_k_j and grad_v_j with shape (K_TILE_SIZE, D).
+        # 3. Sweep over all query tiles Q_i:
+        #    - load Q_i, grad_O_i, LSE_i, and delta_i
+        #    - recompute local scores S_ij = Q_i K_j^T / sqrt(d)
+        #    - apply causal masking for the current (query_tile, key_tile) pair
+        #    - recover local probabilities P_ij = exp(S_ij - LSE_i)
+        # 4. Accumulate grad_v_j using the local contribution
+        #       grad_v_j += P_ij^T @ grad_O_i
+        # 5. Compute the local dP tile using the owned V_j tile
+        #       dP_ij = grad_O_i @ V_j^T
+        #    then form
+        #       dS_ij = P_ij * (dP_ij - delta_i)
+        #    where delta_i is broadcast along the key dimension.
+        # 6. Accumulate grad_k_j using the local contribution
+        #       grad_k_j += dS_ij^T @ Q_i
+        # 7. After all query tiles are processed, cast/store the final grad_k_j and
+        #    grad_v_j tile exactly once.
+        #
+        # Shape checkpoints:
+        # - owned key/value tile:      (K_TILE_SIZE, D)
+        # - one query tile Q_i:        (Q_TILE_SIZE, D)
+        # - local scores/probs P_ij:   (Q_TILE_SIZE, K_TILE_SIZE)
+        # - local grad_O_i:            (Q_TILE_SIZE, D)
+        # - local delta_i:             (Q_TILE_SIZE,)
+        # - accum grad_k_j / grad_v_j: (K_TILE_SIZE, D)
+        #
+        # Causal masking hint:
+        # - if this key tile is strictly to the right of a query tile, that query tile
+        #   contributes nothing and can be skipped entirely.
+        # - only the diagonal-intersecting tiles need per-element masking.
         _ = key_tile_index
         _ = batch_index
+        q_block_ptr = tl.make_block_ptr(
+            base=q_ptr + batch_index * stride_qb,
+            shape=(N_QUERIES, D),
+            strides=(stride_qq, stride_qd),
+            offsets=(0, 0),
+            block_shape=(Q_TILE_SIZE, D),
+            order=(1, 0),
+        )
+        k_block_ptr = tl.make_block_ptr(
+            base=k_ptr + batch_index * stride_kb,
+            shape=(N_KEYS, D),
+            strides=(stride_kk, stride_kd),
+            offsets=(key_tile_index * K_TILE_SIZE, 0),
+            block_shape=(K_TILE_SIZE, D),
+            order=(1, 0),
+        )
+        v_block_ptr = tl.make_block_ptr(
+            base=v_ptr + batch_index * stride_vb,
+            shape=(N_KEYS, D),
+            strides=(stride_vk, stride_vd),
+            offsets=(key_tile_index * K_TILE_SIZE, 0),
+            block_shape=(K_TILE_SIZE, D),
+            order=(1, 0),
+        )
+        grad_k_block_ptr = tl.make_block_ptr(
+            base=grad_k_ptr + batch_index * stride_gkb,
+            shape=(N_KEYS, D),
+            strides=(stride_gkk, stride_gkd),
+            offsets=(key_tile_index * K_TILE_SIZE, 0),
+            block_shape=(K_TILE_SIZE, D),
+            order=(1, 0),
+        )
+        grad_v_block_ptr = tl.make_block_ptr(
+            base=grad_v_ptr + batch_index * stride_gvb,
+            shape=(N_KEYS, D),
+            strides=(stride_gvk, stride_gvd),
+            offsets=(key_tile_index * K_TILE_SIZE, 0),
+            block_shape=(K_TILE_SIZE, D),
+            order=(1, 0),
+        )
+        grad_o_ptr = tl.make_block_ptr(
+            base=grad_o_ptr + batch_index * stride_gob,
+            shape=(N_QUERIES, D),
+            strides=(stride_goq, stride_god),
+            offsets=(0, 0),
+            block_shape=(Q_TILE_SIZE, D),
+            order=(1, 0),
+        )
+        lse_ptr = tl.make_block_ptr(
+            base=lse_ptr + batch_index * stride_lb,
+            shape=(N_QUERIES,),
+            strides=(stride_lq,),
+            offsets=(0,),
+            block_shape=(Q_TILE_SIZE,),
+            order=(0,),
+        )
+        delta_ptr = tl.make_block_ptr(
+            base=delta_ptr + batch_index * stride_db,
+            shape=(N_QUERIES,),
+            strides=(stride_dq,),
+            offsets=(0,),
+            block_shape=(Q_TILE_SIZE,),
+            order=(0,),
+        )
+        k_tile = tl.load(k_block_ptr, boundary_check=(0, 1), padding_option="zero")
+        v_tile = tl.load(v_block_ptr, boundary_check=(0, 1), padding_option="zero")
+        grad_k_tile = tl.zeros((K_TILE_SIZE, D), dtype=tl.float32)
+        grad_v_tile = tl.zeros((K_TILE_SIZE, D), dtype=tl.float32)
+        for query_tile_index in range(tl.cdiv(N_QUERIES, Q_TILE_SIZE)):
+            q_tile = tl.load(q_block_ptr, boundary_check=(0, 1), padding_option="zero")
+            grad_o_tile = tl.load(grad_o_ptr, boundary_check=(0, 1), padding_option="zero")
+            lse_tile = tl.load(lse_ptr, boundary_check=(0, 1), padding_option="zero")
+            delta_tile = tl.load(delta_ptr, boundary_check=(0, 1), padding_option="zero")
+            
+
 
 
     @triton.jit
