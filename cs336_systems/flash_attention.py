@@ -232,8 +232,110 @@ if triton is not None:
         tl.store(o_block_ptr, output_to_store, boundary_check=(0, 1))
         tl.store(l_block_ptr, logsumexp_tile, boundary_check=(0,))
 
+
+    @triton.jit
+    def flash_attention_backward_delta_kernel(
+        o_ptr, grad_o_ptr, delta_ptr,
+        stride_ob, stride_oq, stride_od,
+        stride_gob, stride_goq, stride_god,
+        stride_db, stride_dq,
+        N_QUERIES,
+        D: tl.constexpr,
+        Q_TILE_SIZE: tl.constexpr,
+    ):
+        """
+        TODO(student): compute the per-row delta term
+            D_i = sum_j dO_ij * O_ij
+        for one query tile.
+
+        Suggested milestone:
+        - implement this kernel first
+        - compare its output against `reduce(grad_o * o, '... q d -> ... q', 'sum')`
+        - keep accumulation in fp32
+        """
+        query_tile_index = tl.program_id(0)
+        batch_index = tl.program_id(1)
+
+        # TODO(student): replace this placeholder body with a real tiled reduction.
+        # Shape checkpoint:
+        # - output tile: (Q_TILE_SIZE, D)
+        # - grad_o tile: (Q_TILE_SIZE, D)
+        # - delta tile: (Q_TILE_SIZE,)
+        _ = query_tile_index
+        _ = batch_index
+
+
+    @triton.jit
+    def flash_attention_backward_dkdv_kernel(
+        q_ptr, k_ptr, v_ptr, grad_o_ptr, lse_ptr, delta_ptr, grad_k_ptr, grad_v_ptr,
+        stride_qb, stride_qq, stride_qd,
+        stride_kb, stride_kk, stride_kd,
+        stride_vb, stride_vk, stride_vd,
+        stride_gob, stride_goq, stride_god,
+        stride_lb, stride_lq,
+        stride_db, stride_dq,
+        stride_gkb, stride_gkk, stride_gkd,
+        stride_gvb, stride_gvk, stride_gvd,
+        N_QUERIES, N_KEYS, scale,
+        D: tl.constexpr,
+        Q_TILE_SIZE: tl.constexpr,
+        K_TILE_SIZE: tl.constexpr,
+        IS_CAUSAL: tl.constexpr,
+    ):
+        """
+        TODO(student): implement the dK / dV pass from Algorithm 2.
+
+        Hints:
+        - one program instance should usually own one (batch, key-tile) output tile
+        - recompute scores/probabilities from Q, K, and LSE instead of loading P
+        - write one K/V tile of grad_k and grad_v without atomics if you keep ownership disjoint
+        - for causal masking, skip query tiles that are fully above the diagonal
+        """
+        key_tile_index = tl.program_id(0)
+        batch_index = tl.program_id(1)
+
+        # TODO(student): replace this placeholder body with the tiled dK/dV kernel.
+        _ = key_tile_index
+        _ = batch_index
+
+
+    @triton.jit
+    def flash_attention_backward_dq_kernel(
+        q_ptr, k_ptr, v_ptr, grad_o_ptr, lse_ptr, delta_ptr, grad_q_ptr,
+        stride_qb, stride_qq, stride_qd,
+        stride_kb, stride_kk, stride_kd,
+        stride_vb, stride_vk, stride_vd,
+        stride_gob, stride_goq, stride_god,
+        stride_lb, stride_lq,
+        stride_db, stride_dq,
+        stride_gqb, stride_gqq, stride_gqd,
+        N_QUERIES, N_KEYS, scale,
+        D: tl.constexpr,
+        Q_TILE_SIZE: tl.constexpr,
+        K_TILE_SIZE: tl.constexpr,
+        IS_CAUSAL: tl.constexpr,
+    ):
+        """
+        TODO(student): implement the dQ pass from Algorithm 2.
+
+        Hints:
+        - one program instance should usually own one (batch, query-tile) output tile
+        - accumulate contributions from all relevant key tiles in fp32
+        - use the same recomputed probability logic as the dK/dV pass
+        - this pass is naturally separate from dK/dV, which avoids synchronization
+        """
+        query_tile_index = tl.program_id(0)
+        batch_index = tl.program_id(1)
+
+        # TODO(student): replace this placeholder body with the tiled dQ kernel.
+        _ = query_tile_index
+        _ = batch_index
+
 else:
     flash_attention_forward_kernel = None
+    flash_attention_backward_delta_kernel = None
+    flash_attention_backward_dkdv_kernel = None
+    flash_attention_backward_dq_kernel = None
 
 
 def _flash_attention_forward_pytorch_tiled(
@@ -353,6 +455,122 @@ def _flash_attention_forward_triton(
     return output, logsumexp
 
 
+# Triton backward helper + Triton autograd wiring are intentionally colocated
+# with the Triton forward helper above so kernel iteration stays in one region.
+def _flash_attention_backward_triton(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    o: torch.Tensor,
+    grad_o: torch.Tensor,
+    lse: torch.Tensor,
+    *,
+    q_tile_size: int,
+    k_tile_size: int,
+    is_causal: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Triton backward entry point for FlashAttention.
+
+    TODO(student): Replace the temporary PyTorch fallback below with a Triton
+    implementation of Algorithm 2 from the handout. Keep this wrapper boundary
+    stable so the autograd wiring does not need to change again.
+
+    Suggested implementation plan:
+    1. Compute the per-row delta term D_i = sum_j dO_ij * O_ij in fp32.
+       Hint: this is `row_dot_grad` in the current PyTorch recompute helper.
+    2. Launch one Triton kernel for dK and dV, and a separate Triton kernel for dQ.
+       Hint: the handout suggests two passes over P to avoid atomics/synchronization.
+    3. Recompute scores/probabilities tile-by-tile from Q, K, and saved LSE instead of
+       materializing the full attention matrix.
+    4. Keep accumulator math in fp32 even when inputs are bf16.
+    5. For causal masking, early-exit or skip tiles that are entirely above the diagonal.
+
+    Shape checkpoints before you start filling kernels:
+    - q, k, v, o, grad_o: (batch, seq_len, d_head)
+    - lse: (batch, seq_len)
+    - grad_q, grad_k, grad_v: same shapes as q, k, v
+    """
+    if triton is None or tl is None:
+        raise RuntimeError("Triton is not available in this environment.")
+    if q.device.type != "cuda":
+        raise ValueError("The Triton FlashAttention backward path requires CUDA tensors.")
+
+    # TODO(student): these are the outputs your Triton kernels should write into.
+    # Allocating them here keeps the wrapper signature and dtype/device behavior explicit.
+    grad_q = torch.empty_like(q)
+    grad_k = torch.empty_like(k)
+    grad_v = torch.empty_like(v)
+
+    # TODO(student): compute/store the per-row delta term used in dS = P * (dP - D).
+    # A small standalone kernel can be a good first milestone before writing the
+    # full tiled backward kernels.
+    _unused_delta_shape_hint = (q.shape[0], q.shape[1])
+
+    # Temporary fallback:
+    # keep correctness while you incrementally replace this path with Triton kernels.
+    del grad_q, grad_k, grad_v, _unused_delta_shape_hint, q_tile_size, k_tile_size
+    return _flash_attention_backward_pytorch_recompute(
+        q,
+        k,
+        v,
+        o,
+        grad_o,
+        lse,
+        is_causal=is_causal,
+    )
+
+
+class FlashAttention2TritonFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        is_causal: bool = False,
+    ) -> torch.Tensor:
+        _validate_flash_attention_inputs(q, k, v)
+
+        q_tile_size = _choose_query_tile_size(q.shape[-2])
+        k_tile_size = _choose_key_tile_size(k.shape[-2])
+
+        output, logsumexp = _flash_attention_forward_triton(
+            q,
+            k,
+            v,
+            q_tile_size=q_tile_size,
+            k_tile_size=k_tile_size,
+            is_causal=is_causal,
+        )
+
+        ctx.save_for_backward(logsumexp, q, k, v, output)
+        ctx.is_causal = is_causal
+        ctx.q_tile_size = q_tile_size
+        ctx.k_tile_size = k_tile_size
+        return output
+
+    @staticmethod
+    def backward(
+        ctx,
+        grad_o: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, None]:
+        logsumexp, q, k, v, output = ctx.saved_tensors
+
+        grad_q, grad_k, grad_v = _flash_attention_backward_triton(
+            q,
+            k,
+            v,
+            output,
+            grad_o,
+            logsumexp,
+            q_tile_size=ctx.q_tile_size,
+            k_tile_size=ctx.k_tile_size,
+            is_causal=ctx.is_causal,
+        )
+        return grad_q, grad_k, grad_v, None
+
+
 # Backward helpers
 def _flash_attention_backward_reference(
     q: torch.Tensor,
@@ -439,70 +657,6 @@ def _flash_attention_backward_pytorch_recompute(
     )
 
 
-def _flash_attention_backward_triton(
-    q: torch.Tensor,
-    k: torch.Tensor,
-    v: torch.Tensor,
-    o: torch.Tensor,
-    grad_o: torch.Tensor,
-    lse: torch.Tensor,
-    *,
-    q_tile_size: int,
-    k_tile_size: int,
-    is_causal: bool,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Triton backward entry point for FlashAttention.
-
-    TODO(student): Replace the temporary PyTorch fallback below with a Triton
-    implementation of Algorithm 2 from the handout. Keep this wrapper boundary
-    stable so the autograd wiring does not need to change again.
-
-    Suggested implementation plan:
-    1. Compute the per-row delta term D_i = sum_j dO_ij * O_ij in fp32.
-       Hint: this is `row_dot_grad` in the current PyTorch recompute helper.
-    2. Launch one Triton kernel for dK and dV, and a separate Triton kernel for dQ.
-       Hint: the handout suggests two passes over P to avoid atomics/synchronization.
-    3. Recompute scores/probabilities tile-by-tile from Q, K, and saved LSE instead of
-       materializing the full attention matrix.
-    4. Keep accumulator math in fp32 even when inputs are bf16.
-    5. For causal masking, early-exit or skip tiles that are entirely above the diagonal.
-
-    Shape checkpoints before you start filling kernels:
-    - q, k, v, o, grad_o: (batch, seq_len, d_head)
-    - lse: (batch, seq_len)
-    - grad_q, grad_k, grad_v: same shapes as q, k, v
-    """
-    if triton is None or tl is None:
-        raise RuntimeError("Triton is not available in this environment.")
-    if q.device.type != "cuda":
-        raise ValueError("The Triton FlashAttention backward path requires CUDA tensors.")
-
-    # TODO(student): these are the outputs your Triton kernels should write into.
-    # Allocating them here keeps the wrapper signature and dtype/device behavior explicit.
-    grad_q = torch.empty_like(q)
-    grad_k = torch.empty_like(k)
-    grad_v = torch.empty_like(v)
-
-    # TODO(student): compute/store the per-row delta term used in dS = P * (dP - D).
-    # A small standalone kernel can be a good first milestone before writing the
-    # full tiled backward kernels.
-    _unused_delta_shape_hint = (q.shape[0], q.shape[1])
-
-    # Temporary fallback:
-    # keep correctness while you incrementally replace this path with Triton kernels.
-    del grad_q, grad_k, grad_v, _unused_delta_shape_hint, q_tile_size, k_tile_size
-    return _flash_attention_backward_pytorch_recompute(
-        q,
-        k,
-        v,
-        o,
-        grad_o,
-        lse,
-        is_causal=is_causal,
-    )
-
-
 class FlashAttention2PyTorchFunction(torch.autograd.Function):
     @staticmethod
     def forward(
@@ -547,56 +701,6 @@ class FlashAttention2PyTorchFunction(torch.autograd.Function):
             output,
             grad_o,
             logsumexp,
-            is_causal=ctx.is_causal,
-        )
-        return grad_q, grad_k, grad_v, None
-
-
-class FlashAttention2TritonFunction(torch.autograd.Function):
-    @staticmethod
-    def forward(
-        ctx,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-        is_causal: bool = False,
-    ) -> torch.Tensor:
-        _validate_flash_attention_inputs(q, k, v)
-
-        q_tile_size = _choose_query_tile_size(q.shape[-2])
-        k_tile_size = _choose_key_tile_size(k.shape[-2])
-
-        output, logsumexp = _flash_attention_forward_triton(
-            q,
-            k,
-            v,
-            q_tile_size=q_tile_size,
-            k_tile_size=k_tile_size,
-            is_causal=is_causal,
-        )
-
-        ctx.save_for_backward(logsumexp, q, k, v, output)
-        ctx.is_causal = is_causal
-        ctx.q_tile_size = q_tile_size
-        ctx.k_tile_size = k_tile_size
-        return output
-
-    @staticmethod
-    def backward(
-        ctx,
-        grad_o: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, None]:
-        logsumexp, q, k, v, output = ctx.saved_tensors
-
-        grad_q, grad_k, grad_v = _flash_attention_backward_triton(
-            q,
-            k,
-            v,
-            output,
-            grad_o,
-            logsumexp,
-            q_tile_size=ctx.q_tile_size,
-            k_tile_size=ctx.k_tile_size,
             is_causal=ctx.is_causal,
         )
         return grad_q, grad_k, grad_v, None
