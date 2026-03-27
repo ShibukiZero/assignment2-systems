@@ -337,6 +337,13 @@ def _flash_attention_backward_pytorch_recompute(
     # TODO: implement Section 1.3.2 backward with recomputation.
     D = reduce(grad_o * o, '... q d -> ... q', 'sum')
     S = einsum(q, k, '... q d, ... k d -> ... q k') * q.shape[-1] ** -0.5
+    if is_causal:
+        n_queries = q.shape[-2]
+        n_keys = k.shape[-2]
+        query_positions = torch.arange(n_queries, device=q.device)
+        key_positions = torch.arange(n_keys, device=q.device)
+        causal_mask = query_positions[:, None] >= key_positions[None, :]
+        S = torch.where(causal_mask.unsqueeze(0), S, S.new_full((), -1e6))
     P = torch.exp(S - lse.unsqueeze(-1))
     dV = einsum(P, grad_o, '... q k, ... q d -> ... k d')
     dP = einsum(grad_o, v, '... q d, ... k d -> ... q k')
