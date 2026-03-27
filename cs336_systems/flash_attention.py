@@ -261,8 +261,34 @@ if triton is not None:
         # - output tile: (Q_TILE_SIZE, D)
         # - grad_o tile: (Q_TILE_SIZE, D)
         # - delta tile: (Q_TILE_SIZE,)
-        _ = query_tile_index
-        _ = batch_index
+        o_block_ptr = tl.make_block_ptr(
+            base=o_ptr + batch_index * stride_ob,
+            shape=(N_QUERIES, D),
+            strides=(stride_oq, stride_od),
+            offsets=(query_tile_index * Q_TILE_SIZE, 0),
+            block_shape=(Q_TILE_SIZE, D),
+            order=(1, 0),
+        )
+        grad_o_block_ptr = tl.make_block_ptr(
+            base=grad_o_ptr + batch_index * stride_gob,
+            shape=(N_QUERIES, D),
+            strides=(stride_goq, stride_god),
+            offsets=(query_tile_index * Q_TILE_SIZE, 0),
+            block_shape=(Q_TILE_SIZE, D),
+            order=(1, 0),
+        )
+        delta_block_ptr = tl.make_block_ptr(
+            base=delta_ptr + batch_index * stride_db,
+            shape=(N_QUERIES,),
+            strides=(stride_dq,),
+            offsets=(query_tile_index * Q_TILE_SIZE,),
+            block_shape=(Q_TILE_SIZE,),
+            order=(0,),
+        )
+        o_tile = tl.load(o_block_ptr, boundary_check=(0, 1), padding_option="zero")
+        grad_o_tile = tl.load(grad_o_block_ptr, boundary_check=(0, 1), padding_option="zero")
+        delta_tile = tl.sum(grad_o_tile * o_tile, axis=1)
+        tl.store(delta_block_ptr, delta_tile, boundary_check=(0,))
 
 
     @triton.jit
@@ -457,6 +483,43 @@ def _flash_attention_forward_triton(
 
 # Triton backward helper + Triton autograd wiring are intentionally colocated
 # with the Triton forward helper above so kernel iteration stays in one region.
+def _flash_attention_backward_delta_reference(
+    o: torch.Tensor,
+    grad_o: torch.Tensor,
+) -> torch.Tensor:
+    if o.shape != grad_o.shape:
+        raise ValueError("Expected output and grad_o to have the same shape.")
+    return (o.to(torch.float32) * grad_o.to(torch.float32)).sum(dim=-1)
+
+
+def _flash_attention_backward_delta_triton(
+    o: torch.Tensor,
+    grad_o: torch.Tensor,
+    *,
+    q_tile_size: int,
+) -> torch.Tensor:
+    if o.shape != grad_o.shape:
+        raise ValueError("Expected output and grad_o to have the same shape.")
+    if triton is None or tl is None or flash_attention_backward_delta_kernel is None:
+        raise RuntimeError("Triton is not available in this environment.")
+    if o.device.type != "cuda" or grad_o.device.type != "cuda":
+        raise ValueError("The Triton FlashAttention delta path requires CUDA tensors.")
+
+    batch_size, n_queries, d = o.shape
+    delta = torch.empty((batch_size, n_queries), dtype=torch.float32, device=o.device)
+    grid = (triton.cdiv(n_queries, q_tile_size), batch_size)
+    flash_attention_backward_delta_kernel[grid](
+        o, grad_o, delta,
+        o.stride(0), o.stride(1), o.stride(2),
+        grad_o.stride(0), grad_o.stride(1), grad_o.stride(2),
+        delta.stride(0), delta.stride(1),
+        n_queries,
+        D=d,
+        Q_TILE_SIZE=q_tile_size,
+    )
+    return delta
+
+
 def _flash_attention_backward_triton(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -502,14 +565,17 @@ def _flash_attention_backward_triton(
     grad_k = torch.empty_like(k)
     grad_v = torch.empty_like(v)
 
-    # TODO(student): compute/store the per-row delta term used in dS = P * (dP - D).
-    # A small standalone kernel can be a good first milestone before writing the
-    # full tiled backward kernels.
-    _unused_delta_shape_hint = (q.shape[0], q.shape[1])
+    # TODO(student): once the dQ / dK / dV Triton kernels are ready, thread this delta
+    # tensor through them instead of falling back to the PyTorch recompute helper.
+    delta = _flash_attention_backward_delta_triton(
+        o,
+        grad_o,
+        q_tile_size=q_tile_size,
+    )
 
     # Temporary fallback:
     # keep correctness while you incrementally replace this path with Triton kernels.
-    del grad_q, grad_k, grad_v, _unused_delta_shape_hint, q_tile_size, k_tile_size
+    del grad_q, grad_k, grad_v, delta, q_tile_size, k_tile_size
     return _flash_attention_backward_pytorch_recompute(
         q,
         k,
