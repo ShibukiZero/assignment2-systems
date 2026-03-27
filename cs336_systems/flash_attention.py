@@ -332,27 +332,23 @@ def _flash_attention_backward_pytorch_recompute(
     *,
     is_causal: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    _ = (q, k, v, o, grad_o, lse, is_causal)
-
-    # TODO: implement Section 1.3.2 backward with recomputation.
-    D = reduce(grad_o * o, '... q d -> ... q', 'sum')
-    S = einsum(q, k, '... q d, ... k d -> ... q k') * q.shape[-1] ** -0.5
+    scale = q.shape[-1] ** -0.5
+    row_dot_grad = reduce(grad_o * o, '... q d -> ... q', 'sum')
+    scores = einsum(q, k, '... q d, ... k d -> ... q k') * scale
     if is_causal:
         n_queries = q.shape[-2]
         n_keys = k.shape[-2]
         query_positions = torch.arange(n_queries, device=q.device)
         key_positions = torch.arange(n_keys, device=q.device)
         causal_mask = query_positions[:, None] >= key_positions[None, :]
-        S = torch.where(causal_mask.unsqueeze(0), S, S.new_full((), -1e6))
-    P = torch.exp(S - lse.unsqueeze(-1))
-    dV = einsum(P, grad_o, '... q k, ... q d -> ... k d')
-    dP = einsum(grad_o, v, '... q d, ... k d -> ... q k')
-    dS = P *(dP - D.unsqueeze(-1))
-    dQ = einsum(dS, k, '... q k, ... k d -> ... q d') * q.shape[-1] ** -0.5
-    dK = einsum(dS, q, '... q k, ... q d -> ... k d') * q.shape[-1] ** -0.5
-    return dQ, dK, dV
-
-    # raise NotImplementedError("TODO: implement the recomputation-based FlashAttention backward pass.")
+        scores = torch.where(causal_mask.unsqueeze(0), scores, scores.new_full((), -1e6))
+    probabilities = torch.exp(scores - lse.unsqueeze(-1))
+    grad_v = einsum(probabilities, grad_o, '... q k, ... q d -> ... k d')
+    grad_p = einsum(grad_o, v, '... q d, ... k d -> ... q k')
+    grad_s = probabilities * (grad_p - row_dot_grad.unsqueeze(-1))
+    grad_q = einsum(grad_s, k, '... q k, ... k d -> ... q d') * scale
+    grad_k = einsum(grad_s, q, '... q k, ... q d -> ... k d') * scale
+    return grad_q, grad_k, grad_v
 
 
 class FlashAttention2PyTorchFunction(torch.autograd.Function):
