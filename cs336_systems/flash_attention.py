@@ -201,6 +201,7 @@ if triton is not None:
         running_l = tl.zeros((Q_TILE_SIZE,), dtype=tl.float32)
         running_m = tl.full((Q_TILE_SIZE,), float("-inf"), dtype=tl.float32)
         query_offsets = query_tile_index * Q_TILE_SIZE + tl.arange(0, Q_TILE_SIZE)
+        query_tile_start = query_tile_index * Q_TILE_SIZE
         query_tile_end_exclusive = tl.minimum((query_tile_index + 1) * Q_TILE_SIZE, N_QUERIES)
         num_key_tiles = tl.cdiv(N_KEYS, K_TILE_SIZE)
         if IS_CAUSAL:
@@ -211,14 +212,20 @@ if triton is not None:
             k_tile = tl.load(k_block_ptr, boundary_check=(0, 1), padding_option="zero")
             v_tile = tl.load(v_block_ptr, boundary_check=(0, 1), padding_option="zero")
             key_offsets = key_tile_index * K_TILE_SIZE + tl.arange(0, K_TILE_SIZE)
+            key_tile_end_exclusive = tl.minimum((key_tile_index + 1) * K_TILE_SIZE, N_KEYS)
 
             scores_tile = tl.dot(q_tile, tl.trans(k_tile)) * scale
+            valid_query_mask = query_offsets[:, None] < N_QUERIES
             valid_key_mask = key_offsets[None, :] < N_KEYS
             if IS_CAUSAL:
-                causal_mask = query_offsets[:, None] >= key_offsets[None, :]
-                score_mask = causal_mask & valid_key_mask
+                # Tiles fully below the diagonal do not need any elementwise causal comparisons.
+                if key_tile_end_exclusive <= query_tile_start + 1:
+                    score_mask = valid_query_mask & valid_key_mask
+                else:
+                    causal_mask = query_offsets[:, None] >= key_offsets[None, :]
+                    score_mask = causal_mask & valid_query_mask & valid_key_mask
             else:
-                score_mask = valid_key_mask
+                score_mask = valid_query_mask & valid_key_mask
             scores_tile = tl.where(score_mask, scores_tile, -1e6)
 
             prev_running_m = running_m
@@ -432,6 +439,7 @@ if triton is not None:
         grad_k_tile = tl.zeros((K_TILE_SIZE, D), dtype=tl.float32)
         grad_v_tile = tl.zeros((K_TILE_SIZE, D), dtype=tl.float32)
         key_tile_start = key_tile_index * K_TILE_SIZE
+        key_tile_end_exclusive = tl.minimum((key_tile_index + 1) * K_TILE_SIZE, N_KEYS)
         start_query_tile_index = 0
         if IS_CAUSAL:
             # Query tiles ending before this key tile starts are always fully masked out.
@@ -446,13 +454,18 @@ if triton is not None:
             lse_tile = tl.load(lse_ptr, boundary_check=(0,), padding_option="zero")
             delta_tile = tl.load(delta_ptr, boundary_check=(0,), padding_option="zero")
             scores_tile = tl.dot(q_tile, tl.trans(k_tile)) * scale
+            query_tile_start = query_tile_index * Q_TILE_SIZE
             query_offsets = query_tile_index * Q_TILE_SIZE + tl.arange(0, Q_TILE_SIZE)
             key_offsets = key_tile_index * K_TILE_SIZE + tl.arange(0, K_TILE_SIZE)
             valid_query_mask = query_offsets[:, None] < N_QUERIES
             valid_key_mask = key_offsets[None, :] < N_KEYS
             if IS_CAUSAL:
-                causal_mask = query_offsets[:, None] >= key_offsets[None, :]
-                score_mask = causal_mask & valid_query_mask & valid_key_mask
+                # Tiles fully below the diagonal only need padding masks.
+                if query_tile_start + 1 >= key_tile_end_exclusive:
+                    score_mask = valid_query_mask & valid_key_mask
+                else:
+                    causal_mask = query_offsets[:, None] >= key_offsets[None, :]
+                    score_mask = causal_mask & valid_query_mask & valid_key_mask
             else:
                 score_mask = valid_query_mask & valid_key_mask
             scores_tile = tl.where(score_mask, scores_tile, -1e6)
@@ -605,6 +618,7 @@ if triton is not None:
         lse_tile = tl.load(lse_ptr, boundary_check=(0,), padding_option="zero")
         delta_tile = tl.load(delta_ptr, boundary_check=(0,), padding_option="zero")
         grad_q_tile = tl.zeros((Q_TILE_SIZE, D), dtype=tl.float32)
+        query_tile_start = query_tile_index * Q_TILE_SIZE
         query_tile_end_exclusive = tl.minimum((query_tile_index + 1) * Q_TILE_SIZE, N_QUERIES)
         num_key_tiles = tl.cdiv(N_KEYS, K_TILE_SIZE)
         if IS_CAUSAL:
@@ -616,11 +630,16 @@ if triton is not None:
             scores_tile = tl.dot(q_tile, tl.trans(k_tile)) * scale
             query_offsets = query_tile_index * Q_TILE_SIZE + tl.arange(0, Q_TILE_SIZE)
             key_offsets = key_tile_index * K_TILE_SIZE + tl.arange(0, K_TILE_SIZE)
+            key_tile_end_exclusive = tl.minimum((key_tile_index + 1) * K_TILE_SIZE, N_KEYS)
             valid_query_mask = query_offsets[:, None] < N_QUERIES
             valid_key_mask = key_offsets[None, :] < N_KEYS
             if IS_CAUSAL:
-                causal_mask = query_offsets[:, None] >= key_offsets[None, :]
-                score_mask = causal_mask & valid_query_mask & valid_key_mask
+                # Tiles fully below the diagonal only need padding masks.
+                if key_tile_end_exclusive <= query_tile_start + 1:
+                    score_mask = valid_query_mask & valid_key_mask
+                else:
+                    causal_mask = query_offsets[:, None] >= key_offsets[None, :]
+                    score_mask = causal_mask & valid_query_mask & valid_key_mask
             else:
                 score_mask = valid_query_mask & valid_key_mask
             scores_tile = tl.where(score_mask, scores_tile, -1e6)
