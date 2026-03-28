@@ -120,6 +120,25 @@ def test_flash_backward_triton_helper_matches_pytorch_recompute(is_causal, dtype
         is_causal=is_causal,
     )
 
-    torch.testing.assert_close(grad_q_expected, grad_q_actual, rtol=1e-2, atol=1e-2)
-    torch.testing.assert_close(grad_k_expected, grad_k_actual, rtol=1e-2, atol=1e-2)
-    torch.testing.assert_close(grad_v_expected, grad_v_actual, rtol=1e-2, atol=1e-2)
+    assert grad_q_actual.dtype == q.dtype
+    assert grad_k_actual.dtype == k.dtype
+    assert grad_v_actual.dtype == v.dtype
+
+    torch.testing.assert_close(
+        grad_q_expected.to(torch.float32),
+        grad_q_actual.to(torch.float32),
+        rtol=1e-2,
+        atol=1e-2,
+    )
+    torch.testing.assert_close(
+        grad_k_expected.to(torch.float32),
+        grad_k_actual.to(torch.float32),
+        rtol=1e-2,
+        atol=1e-2,
+    )
+    torch.testing.assert_close(
+        grad_v_expected.to(torch.float32),
+        grad_v_actual.to(torch.float32),
+        rtol=1e-2,
+        atol=1e-2,
+    )

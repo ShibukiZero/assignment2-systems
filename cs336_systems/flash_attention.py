@@ -957,6 +957,9 @@ def _flash_attention_backward_pytorch_recompute_impl(
     *,
     is_causal: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    output_dtype_q = q.dtype
+    output_dtype_k = k.dtype
+    output_dtype_v = v.dtype
     scale = q.shape[-1] ** -0.5
     row_dot_grad = reduce(grad_o * o, '... q d -> ... q', 'sum')
     scores = einsum(q, k, '... q d, ... k d -> ... q k') * scale
@@ -973,11 +976,22 @@ def _flash_attention_backward_pytorch_recompute_impl(
     grad_s = probabilities * (grad_p - row_dot_grad.unsqueeze(-1))
     grad_q = einsum(grad_s, k, '... q k, ... k d -> ... q d') * scale
     grad_k = einsum(grad_s, q, '... q k, ... q d -> ... k d') * scale
-    return grad_q, grad_k, grad_v
+    return (
+        grad_q.to(output_dtype_q),
+        grad_k.to(output_dtype_k),
+        grad_v.to(output_dtype_v),
+    )
 
 
-@functools.lru_cache(maxsize=1)
-def _get_compiled_flash_attention_backward():
+@functools.lru_cache(maxsize=8)
+def _get_compiled_flash_attention_backward(
+    q_dtype: torch.dtype,
+    k_dtype: torch.dtype,
+    v_dtype: torch.dtype,
+    o_dtype: torch.dtype,
+    grad_o_dtype: torch.dtype,
+    lse_dtype: torch.dtype,
+):
     compile_fn = getattr(torch, "compile", None)
     if compile_fn is None:
         return _flash_attention_backward_pytorch_recompute_impl
@@ -994,7 +1008,14 @@ def _flash_attention_backward_pytorch_recompute(
     *,
     is_causal: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    compiled_backward = _get_compiled_flash_attention_backward()
+    compiled_backward = _get_compiled_flash_attention_backward(
+        q.dtype,
+        k.dtype,
+        v.dtype,
+        o.dtype,
+        grad_o.dtype,
+        lse.dtype,
+    )
     return compiled_backward(
         q,
         k,
