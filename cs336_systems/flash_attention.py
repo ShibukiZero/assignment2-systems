@@ -201,8 +201,13 @@ if triton is not None:
         running_l = tl.zeros((Q_TILE_SIZE,), dtype=tl.float32)
         running_m = tl.full((Q_TILE_SIZE,), float("-inf"), dtype=tl.float32)
         query_offsets = query_tile_index * Q_TILE_SIZE + tl.arange(0, Q_TILE_SIZE)
+        query_tile_end_exclusive = tl.minimum((query_tile_index + 1) * Q_TILE_SIZE, N_QUERIES)
+        num_key_tiles = tl.cdiv(N_KEYS, K_TILE_SIZE)
+        if IS_CAUSAL:
+            # Skip key tiles whose columns are strictly to the right of this query tile.
+            num_key_tiles = tl.cdiv(query_tile_end_exclusive, K_TILE_SIZE)
 
-        for key_tile_index in range(tl.cdiv(N_KEYS, K_TILE_SIZE)):
+        for key_tile_index in range(num_key_tiles):
             k_tile = tl.load(k_block_ptr, boundary_check=(0, 1), padding_option="zero")
             v_tile = tl.load(v_block_ptr, boundary_check=(0, 1), padding_option="zero")
             key_offsets = key_tile_index * K_TILE_SIZE + tl.arange(0, K_TILE_SIZE)
@@ -426,7 +431,16 @@ if triton is not None:
         v_tile = tl.load(v_block_ptr, boundary_check=(0, 1), padding_option="zero")
         grad_k_tile = tl.zeros((K_TILE_SIZE, D), dtype=tl.float32)
         grad_v_tile = tl.zeros((K_TILE_SIZE, D), dtype=tl.float32)
-        for query_tile_index in range(tl.cdiv(N_QUERIES, Q_TILE_SIZE)):
+        key_tile_start = key_tile_index * K_TILE_SIZE
+        start_query_tile_index = 0
+        if IS_CAUSAL:
+            # Query tiles ending before this key tile starts are always fully masked out.
+            start_query_tile_index = key_tile_start // Q_TILE_SIZE
+            q_block_ptr = tl.advance(q_block_ptr, (start_query_tile_index * Q_TILE_SIZE, 0))
+            grad_o_ptr = tl.advance(grad_o_ptr, (start_query_tile_index * Q_TILE_SIZE, 0))
+            lse_ptr = tl.advance(lse_ptr, (start_query_tile_index * Q_TILE_SIZE,))
+            delta_ptr = tl.advance(delta_ptr, (start_query_tile_index * Q_TILE_SIZE,))
+        for query_tile_index in range(start_query_tile_index, tl.cdiv(N_QUERIES, Q_TILE_SIZE)):
             q_tile = tl.load(q_block_ptr, boundary_check=(0, 1), padding_option="zero")
             grad_o_tile = tl.load(grad_o_ptr, boundary_check=(0, 1), padding_option="zero")
             lse_tile = tl.load(lse_ptr, boundary_check=(0,), padding_option="zero")
@@ -591,7 +605,12 @@ if triton is not None:
         lse_tile = tl.load(lse_ptr, boundary_check=(0,), padding_option="zero")
         delta_tile = tl.load(delta_ptr, boundary_check=(0,), padding_option="zero")
         grad_q_tile = tl.zeros((Q_TILE_SIZE, D), dtype=tl.float32)
-        for key_tile_index in range(tl.cdiv(N_KEYS, K_TILE_SIZE)):
+        query_tile_end_exclusive = tl.minimum((query_tile_index + 1) * Q_TILE_SIZE, N_QUERIES)
+        num_key_tiles = tl.cdiv(N_KEYS, K_TILE_SIZE)
+        if IS_CAUSAL:
+            # Key tiles strictly to the right of this query tile are always fully masked out.
+            num_key_tiles = tl.cdiv(query_tile_end_exclusive, K_TILE_SIZE)
+        for key_tile_index in range(num_key_tiles):
             k_tile = tl.load(k_block_ptr, boundary_check=(0, 1), padding_option="zero")
             v_tile = tl.load(v_block_ptr, boundary_check=(0, 1), padding_option="zero")
             scores_tile = tl.dot(q_tile, tl.trans(k_tile)) * scale
