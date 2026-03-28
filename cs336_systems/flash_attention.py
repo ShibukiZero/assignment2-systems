@@ -431,7 +431,22 @@ if triton is not None:
             grad_o_tile = tl.load(grad_o_ptr, boundary_check=(0, 1), padding_option="zero")
             lse_tile = tl.load(lse_ptr, boundary_check=(0, 1), padding_option="zero")
             delta_tile = tl.load(delta_ptr, boundary_check=(0, 1), padding_option="zero")
-            
+            scores_tile = tl.dot(q_tile, tl.trans(k_tile)) * scale
+            if IS_CAUSAL:
+                query_offsets = query_tile_index * Q_TILE_SIZE + tl.arange(0, Q_TILE_SIZE)
+                key_offsets = key_tile_index * K_TILE_SIZE + tl.arange(0, K_TILE_SIZE)
+                causal_mask = query_offsets[:, None] >= key_offsets[None, :]
+                scores_tile = tl.where(causal_mask, scores_tile, -1e6)
+            probabilities_tile = tl.exp(scores_tile - lse_tile[:, None])
+            grad_v_tile += tl.dot(tl.trans(probabilities_tile), grad_o_tile.to(v_tile.dtype), acc=grad_v_tile).to(grad_v_tile.dtype)
+            grad_s_tile = probabilities_tile * (tl.dot(grad_o_tile, tl.trans(v_tile)) - delta_tile[:, None])
+            grad_k_tile += tl.dot(tl.trans(grad_s_tile), q_tile, acc=grad_k_tile).to(grad_k_tile.dtype)
+            q_block_ptr = tl.advance(q_block_ptr, (Q_TILE_SIZE, 0))
+            grad_o_ptr = tl.advance(grad_o_ptr, (Q_TILE_SIZE, 0))
+            lse_ptr = tl.advance(lse_ptr, (Q_TILE_SIZE,))
+            delta_ptr = tl.advance(delta_ptr, (Q_TILE_SIZE,))
+        tl.store(grad_k_block_ptr, grad_k_tile.to(grad_k_block_ptr.type.element_ty), boundary_check=(0, 1))
+        tl.store(grad_v_block_ptr, grad_v_tile.to(grad_v_block_ptr.type.element_ty), boundary_check=(0, 1))
 
 
 
