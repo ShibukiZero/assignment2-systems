@@ -429,22 +429,29 @@ if triton is not None:
         for query_tile_index in range(tl.cdiv(N_QUERIES, Q_TILE_SIZE)):
             q_tile = tl.load(q_block_ptr, boundary_check=(0, 1), padding_option="zero")
             grad_o_tile = tl.load(grad_o_ptr, boundary_check=(0, 1), padding_option="zero")
-            lse_tile = tl.load(lse_ptr, boundary_check=(0, 1), padding_option="zero")
-            delta_tile = tl.load(delta_ptr, boundary_check=(0, 1), padding_option="zero")
+            lse_tile = tl.load(lse_ptr, boundary_check=(0,), padding_option="zero")
+            delta_tile = tl.load(delta_ptr, boundary_check=(0,), padding_option="zero")
             scores_tile = tl.dot(q_tile, tl.trans(k_tile)) * scale
+            query_offsets = query_tile_index * Q_TILE_SIZE + tl.arange(0, Q_TILE_SIZE)
+            key_offsets = key_tile_index * K_TILE_SIZE + tl.arange(0, K_TILE_SIZE)
+            valid_query_mask = query_offsets[:, None] < N_QUERIES
+            valid_key_mask = key_offsets[None, :] < N_KEYS
             if IS_CAUSAL:
-                query_offsets = query_tile_index * Q_TILE_SIZE + tl.arange(0, Q_TILE_SIZE)
-                key_offsets = key_tile_index * K_TILE_SIZE + tl.arange(0, K_TILE_SIZE)
                 causal_mask = query_offsets[:, None] >= key_offsets[None, :]
-                scores_tile = tl.where(causal_mask, scores_tile, -1e6)
+                score_mask = causal_mask & valid_query_mask & valid_key_mask
+            else:
+                score_mask = valid_query_mask & valid_key_mask
+            scores_tile = tl.where(score_mask, scores_tile, -1e6)
             probabilities_tile = tl.exp(scores_tile - lse_tile[:, None])
-            grad_v_tile += tl.dot(tl.trans(probabilities_tile), grad_o_tile.to(v_tile.dtype), acc=grad_v_tile).to(grad_v_tile.dtype)
+            probs_for_grad_o = probabilities_tile.to(grad_o_tile.dtype)
+            grad_v_tile = tl.dot(tl.trans(probs_for_grad_o), grad_o_tile, acc=grad_v_tile)
             grad_s_tile = probabilities_tile * (tl.dot(grad_o_tile, tl.trans(v_tile)) - delta_tile[:, None])
-            grad_k_tile += tl.dot(tl.trans(grad_s_tile), q_tile, acc=grad_k_tile).to(grad_k_tile.dtype)
+            grad_k_tile = tl.dot(tl.trans(grad_s_tile.to(q_tile.dtype)), q_tile, acc=grad_k_tile)
             q_block_ptr = tl.advance(q_block_ptr, (Q_TILE_SIZE, 0))
             grad_o_ptr = tl.advance(grad_o_ptr, (Q_TILE_SIZE, 0))
             lse_ptr = tl.advance(lse_ptr, (Q_TILE_SIZE,))
             delta_ptr = tl.advance(delta_ptr, (Q_TILE_SIZE,))
+        grad_k_tile = grad_k_tile * scale
         tl.store(grad_k_block_ptr, grad_k_tile.to(grad_k_block_ptr.type.element_ty), boundary_check=(0, 1))
         tl.store(grad_v_block_ptr, grad_v_tile.to(grad_v_block_ptr.type.element_ty), boundary_check=(0, 1))
 
@@ -588,16 +595,22 @@ if triton is not None:
             k_tile = tl.load(k_block_ptr, boundary_check=(0, 1), padding_option="zero")
             v_tile = tl.load(v_block_ptr, boundary_check=(0, 1), padding_option="zero")
             scores_tile = tl.dot(q_tile, tl.trans(k_tile)) * scale
+            query_offsets = query_tile_index * Q_TILE_SIZE + tl.arange(0, Q_TILE_SIZE)
+            key_offsets = key_tile_index * K_TILE_SIZE + tl.arange(0, K_TILE_SIZE)
+            valid_query_mask = query_offsets[:, None] < N_QUERIES
+            valid_key_mask = key_offsets[None, :] < N_KEYS
             if IS_CAUSAL:
-                query_offsets = query_tile_index * Q_TILE_SIZE + tl.arange(0, Q_TILE_SIZE)
-                key_offsets = key_tile_index * K_TILE_SIZE + tl.arange(0, K_TILE_SIZE)
                 causal_mask = query_offsets[:, None] >= key_offsets[None, :]
-                scores_tile = tl.where(causal_mask, scores_tile, -1e6)
+                score_mask = causal_mask & valid_query_mask & valid_key_mask
+            else:
+                score_mask = valid_query_mask & valid_key_mask
+            scores_tile = tl.where(score_mask, scores_tile, -1e6)
             probabilities_tile = tl.exp(scores_tile - lse_tile[:, None])
             grad_s_tile = probabilities_tile * (tl.dot(grad_o_tile, tl.trans(v_tile)) - delta_tile[:, None])
-            grad_q_tile += tl.dot(grad_s_tile, k_tile, acc=grad_q_tile).to(grad_q_tile.dtype) * scale
+            grad_q_tile = tl.dot(grad_s_tile.to(k_tile.dtype), k_tile, acc=grad_q_tile)
             k_block_ptr = tl.advance(k_block_ptr, (K_TILE_SIZE, 0))
             v_block_ptr = tl.advance(v_block_ptr, (K_TILE_SIZE, 0))
+        grad_q_tile = grad_q_tile * scale
         tl.store(grad_q_block_ptr, grad_q_tile.to(grad_q_block_ptr.type.element_ty), boundary_check=(0, 1))
         
 
@@ -817,19 +830,44 @@ def _flash_attention_backward_triton(
         grad_o,
         q_tile_size=q_tile_size,
     )
+    batch_size, n_queries, d = q.shape
+    n_keys = k.shape[-2]
+    scale = q.shape[-1] ** -0.5
 
-    # Temporary fallback:
-    # keep correctness while you incrementally replace this path with Triton kernels.
-    del grad_q, grad_k, grad_v, delta, q_tile_size, k_tile_size
-    return _flash_attention_backward_pytorch_recompute(
-        q,
-        k,
-        v,
-        o,
-        grad_o,
-        lse,
-        is_causal=is_causal,
+    dkdv_grid = (triton.cdiv(n_keys, k_tile_size), batch_size)
+    flash_attention_backward_dkdv_kernel[dkdv_grid](
+        q, k, v, grad_o, lse, delta, grad_k, grad_v,
+        q.stride(0), q.stride(1), q.stride(2),
+        k.stride(0), k.stride(1), k.stride(2),
+        v.stride(0), v.stride(1), v.stride(2),
+        grad_o.stride(0), grad_o.stride(1), grad_o.stride(2),
+        lse.stride(0), lse.stride(1),
+        delta.stride(0), delta.stride(1),
+        grad_k.stride(0), grad_k.stride(1), grad_k.stride(2),
+        grad_v.stride(0), grad_v.stride(1), grad_v.stride(2),
+        n_queries, n_keys, scale,
+        D=d,
+        Q_TILE_SIZE=q_tile_size,
+        K_TILE_SIZE=k_tile_size,
+        IS_CAUSAL=is_causal,
     )
+    dq_grid = (triton.cdiv(n_queries, q_tile_size), batch_size)
+    flash_attention_backward_dq_kernel[dq_grid](
+        q, k, v, grad_o, lse, delta, grad_q,
+        q.stride(0), q.stride(1), q.stride(2),
+        k.stride(0), k.stride(1), k.stride(2),
+        v.stride(0), v.stride(1), v.stride(2),
+        grad_o.stride(0), grad_o.stride(1), grad_o.stride(2),
+        lse.stride(0), lse.stride(1),
+        delta.stride(0), delta.stride(1),
+        grad_q.stride(0), grad_q.stride(1), grad_q.stride(2),
+        n_queries, n_keys, scale,
+        D=d,
+        Q_TILE_SIZE=q_tile_size,
+        K_TILE_SIZE=k_tile_size,
+        IS_CAUSAL=is_causal,
+    )
+    return grad_q, grad_k, grad_v
 
 
 class FlashAttention2TritonFunction(torch.autograd.Function):
