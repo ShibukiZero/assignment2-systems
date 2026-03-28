@@ -479,8 +479,128 @@ if triton is not None:
         batch_index = tl.program_id(1)
 
         # TODO(student): replace this placeholder body with the tiled dQ kernel.
+        #
+        # Recommended flow for this pass:
+        # 1. Let this program instance own exactly one (batch, query_tile) output tile.
+        #    That means only this block should write the corresponding grad_q tile.
+        # 2. Load the current Q_i tile once, together with the matching grad_O_i,
+        #    LSE_i, and delta_i values for that same query tile.
+        # 3. Initialize an fp32 accumulator grad_q_i with shape (Q_TILE_SIZE, D).
+        # 4. Sweep over all key/value tiles K_j / V_j:
+        #    - load K_j and V_j
+        #    - recompute local scores S_ij = Q_i K_j^T / sqrt(d)
+        #    - apply causal masking for the current (query_tile, key_tile) pair
+        #    - recover local probabilities P_ij = exp(S_ij - LSE_i)
+        # 5. Compute the local dP tile using the owned V_j tile
+        #       dP_ij = grad_O_i @ V_j^T
+        #    then form
+        #       dS_ij = P_ij * (dP_ij - delta_i)
+        #    where delta_i is broadcast along the key dimension.
+        # 6. Accumulate grad_q_i using the local contribution
+        #       grad_q_i += dS_ij @ K_j
+        #    and remember the final scale factor:
+        #       grad_q_i = grad_q_i * scale
+        #    The multiplication by `scale` should happen exactly once overall.
+        # 7. After all key tiles are processed, cast/store the final grad_q_i tile
+        #    exactly once.
+        #
+        # Shape checkpoints:
+        # - owned query tile Q_i:      (Q_TILE_SIZE, D)
+        # - local grad_O_i:            (Q_TILE_SIZE, D)
+        # - local LSE_i / delta_i:     (Q_TILE_SIZE,)
+        # - one key/value tile K_j:    (K_TILE_SIZE, D)
+        # - local scores/probs P_ij:   (Q_TILE_SIZE, K_TILE_SIZE)
+        # - accum grad_q_i:            (Q_TILE_SIZE, D)
+        #
+        # Causal masking hint:
+        # - if a key tile is strictly to the right of this query tile, it contributes
+        #   nothing and can be skipped entirely.
+        # - only the diagonal-intersecting tiles need per-element masking.
+        #
+        # Debugging hint:
+        # - this pass is the mirror image of the dK/dV pass:
+        #   here the output owner is the query tile, and the reduction dimension is
+        #   the key/value axis.
         _ = query_tile_index
         _ = batch_index
+        q_block_ptr = tl.make_block_ptr(
+            base=q_ptr + batch_index * stride_qb,
+            shape=(N_QUERIES, D),
+            strides=(stride_qq, stride_qd),
+            offsets=(query_tile_index * Q_TILE_SIZE, 0),
+            block_shape=(Q_TILE_SIZE, D),
+            order=(1, 0),
+        )
+        k_block_ptr = tl.make_block_ptr(
+            base=k_ptr + batch_index * stride_kb,
+            shape=(N_KEYS, D),
+            strides=(stride_kk, stride_kd),
+            offsets=(0, 0),
+            block_shape=(K_TILE_SIZE, D),
+            order=(1, 0),
+        )
+        v_block_ptr = tl.make_block_ptr(
+            base=v_ptr + batch_index * stride_vb,
+            shape=(N_KEYS, D),
+            strides=(stride_vk, stride_vd),
+            offsets=(0, 0),
+            block_shape=(K_TILE_SIZE, D),
+            order=(1, 0),
+        )
+        grad_o_ptr = tl.make_block_ptr(
+            base=grad_o_ptr + batch_index * stride_gob,
+            shape=(N_QUERIES, D),
+            strides=(stride_goq, stride_god),
+            offsets=(query_tile_index * Q_TILE_SIZE, 0),
+            block_shape=(Q_TILE_SIZE, D),
+            order=(1, 0),
+        )
+        lse_ptr = tl.make_block_ptr(
+            base=lse_ptr + batch_index * stride_lb,
+            shape=(N_QUERIES,),
+            strides=(stride_lq,),
+            offsets=(query_tile_index * Q_TILE_SIZE,),
+            block_shape=(Q_TILE_SIZE,),
+            order=(0,),
+        )
+        delta_ptr = tl.make_block_ptr(
+            base=delta_ptr + batch_index * stride_db,
+            shape=(N_QUERIES,),
+            strides=(stride_dq,),
+            offsets=(query_tile_index * Q_TILE_SIZE,),
+            block_shape=(Q_TILE_SIZE,),
+            order=(0,),
+        )
+        grad_q_block_ptr = tl.make_block_ptr(
+            base=grad_q_ptr + batch_index * stride_gqb,
+            shape=(N_QUERIES, D),
+            strides=(stride_gqq, stride_gqd),
+            offsets=(query_tile_index * Q_TILE_SIZE, 0),
+            block_shape=(Q_TILE_SIZE, D),
+            order=(1, 0),
+        )
+        q_tile = tl.load(q_block_ptr, boundary_check=(0, 1), padding_option="zero")
+        grad_o_tile = tl.load(grad_o_ptr, boundary_check=(0, 1), padding_option="zero")
+        lse_tile = tl.load(lse_ptr, boundary_check=(0,), padding_option="zero")
+        delta_tile = tl.load(delta_ptr, boundary_check=(0,), padding_option="zero")
+        grad_q_tile = tl.zeros((Q_TILE_SIZE, D), dtype=tl.float32)
+        for key_tile_index in range(tl.cdiv(N_KEYS, K_TILE_SIZE)):
+            k_tile = tl.load(k_block_ptr, boundary_check=(0, 1), padding_option="zero")
+            v_tile = tl.load(v_block_ptr, boundary_check=(0, 1), padding_option="zero")
+            scores_tile = tl.dot(q_tile, tl.trans(k_tile)) * scale
+            if IS_CAUSAL:
+                query_offsets = query_tile_index * Q_TILE_SIZE + tl.arange(0, Q_TILE_SIZE)
+                key_offsets = key_tile_index * K_TILE_SIZE + tl.arange(0, K_TILE_SIZE)
+                causal_mask = query_offsets[:, None] >= key_offsets[None, :]
+                scores_tile = tl.where(causal_mask, scores_tile, -1e6)
+            probabilities_tile = tl.exp(scores_tile - lse_tile[:, None])
+            grad_s_tile = probabilities_tile * (tl.dot(grad_o_tile, tl.trans(v_tile)) - delta_tile[:, None])
+            grad_q_tile += tl.dot(grad_s_tile, k_tile, acc=grad_q_tile).to(grad_q_tile.dtype) * scale
+            k_block_ptr = tl.advance(k_block_ptr, (K_TILE_SIZE, 0))
+            v_block_ptr = tl.advance(v_block_ptr, (K_TILE_SIZE, 0))
+        tl.store(grad_q_block_ptr, grad_q_tile.to(grad_q_block_ptr.type.element_ty), boundary_check=(0, 1))
+        
+
 
 else:
     flash_attention_forward_kernel = None
