@@ -8,6 +8,7 @@ from cs336_systems.flash_attention import (
     _flash_attention_backward_reference,
     _flash_attention_backward_triton,
     _flash_attention_forward_triton,
+    flash_attention_tile_size_override,
     flash_attention_forward_reference,
 )
 
@@ -90,14 +91,30 @@ def test_flash_backward_delta_triton_matches_reference(dtype):
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
 def test_flash_backward_triton_helper_matches_pytorch_recompute(is_causal, dtype):
     q, k, v, grad_o = _make_backward_module_inputs(device="cuda", dtype=dtype)
-    output, lse = _flash_attention_forward_triton(
-        q,
-        k,
-        v,
-        q_tile_size=16,
-        k_tile_size=16,
-        is_causal=is_causal,
-    )
+    with flash_attention_tile_size_override(
+        forward_q_tile_size=16,
+        forward_k_tile_size=16,
+        backward_dq_q_tile_size=16,
+        backward_dq_k_tile_size=16,
+        backward_dkdv_q_tile_size=16,
+        backward_dkdv_k_tile_size=16,
+    ):
+        output, lse = _flash_attention_forward_triton(
+            q,
+            k,
+            v,
+            is_causal=is_causal,
+        )
+
+        grad_q_actual, grad_k_actual, grad_v_actual = _flash_attention_backward_triton(
+            q,
+            k,
+            v,
+            output,
+            grad_o,
+            lse,
+            is_causal=is_causal,
+        )
 
     grad_q_expected, grad_k_expected, grad_v_expected = _flash_attention_backward_pytorch_recompute(
         q,
@@ -106,17 +123,6 @@ def test_flash_backward_triton_helper_matches_pytorch_recompute(is_causal, dtype
         output,
         grad_o,
         lse,
-        is_causal=is_causal,
-    )
-    grad_q_actual, grad_k_actual, grad_v_actual = _flash_attention_backward_triton(
-        q,
-        k,
-        v,
-        output,
-        grad_o,
-        lse,
-        q_tile_size=16,
-        k_tile_size=16,
         is_causal=is_causal,
     )
 

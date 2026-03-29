@@ -180,7 +180,7 @@ def get_flash_attention_best_configs() -> dict[str, dict[str, int] | None]:
 
 
 def get_flash_attention_autotune_candidate_counts() -> dict[str, int]:
-    configs_by_kernel = _load_autotune_config_payload()
+    configs_by_kernel = _load_autotune_config_specs()
     return {
         kernel_name: len(kernel_configs)
         for kernel_name, kernel_configs in configs_by_kernel.items()
