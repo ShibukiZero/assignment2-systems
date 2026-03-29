@@ -164,3 +164,7 @@ cython_debug/
 .idea/
 .agents/
 AGENTS.md
+.DS_Store
+*.nsys-rep
+*.qdrep
+*.qdstrm

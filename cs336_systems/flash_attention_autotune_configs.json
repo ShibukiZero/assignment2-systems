@@ -1,0 +1,26 @@
+{
+  "forward": [
+    {
+      "Q_TILE_SIZE": 64,
+      "K_TILE_SIZE": 64,
+      "num_warps": 4,
+      "num_stages": 2
+    }
+  ],
+  "backward_dq": [
+    {
+      "Q_TILE_SIZE": 64,
+      "K_TILE_SIZE": 64,
+      "num_warps": 4,
+      "num_stages": 2
+    }
+  ],
+  "backward_dkdv": [
+    {
+      "Q_TILE_SIZE": 64,
+      "K_TILE_SIZE": 64,
+      "num_warps": 4,
+      "num_stages": 2
+    }
+  ]
+}

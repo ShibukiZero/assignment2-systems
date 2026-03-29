@@ -1,0 +1,52 @@
+
+NOTICE: Existing SQLite export found: .agents/logs/1_1_4_train_step_attention/2.7b_ctx512_train_step_attention.sqlite
+        It is assumed file was previously exported from: .agents/logs/1_1_4_train_step_attention/2.7b_ctx512_train_step_attention.nsys-rep
+        Consider using --force-export=true if needed.
+
+Processing [.agents/logs/1_1_4_train_step_attention/2.7b_ctx512_train_step_attention.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.1.1/target-linux-x64/reports/cuda_gpu_kern_sum.py](nvtx-name:base)... 
+
+ ** CUDA GPU Kernel Summary (cuda_gpu_kern_sum):
+
+ Time (%)  Total Time (ns)  Instances  Avg (ns)   Med (ns)   Min (ns)  Max (ns)  StdDev (ns)                                                  Name                                                
+ --------  ---------------  ---------  ---------  ---------  --------  --------  -----------  ----------------------------------------------------------------------------------------------------
+     18.0       5234369323       1455  3597504.7  3581891.0   3578596   3632421      23113.0  Kernel2                                                                                             
+     15.0       4362925207        975  4474795.1  4478490.0   4389748   4506037      13153.0  forward/sm80_xmma_gemm_f32f32_f32f32_f32_tn_n_tilesize64x64x8_stage3_warpsize1x4x1_ffma_aligna4_ali…
+     14.5       4206269570       2400  1752612.3  1152566.5   1148086   4181007    1201783.0  forward/sm80_xmma_gemm_f32f32_f32f32_f32_tn_n_tilesize128x64x8_stage3_warpsize2x2x1_ffma_aligna4_al…
+     14.0       4070703033       2400  1696126.3  1081398.0   1079605   4177652    1230025.8  sm80_xmma_gemm_f32f32_f32f32_f32_nn_n_tilesize64x64x8_stage3_warpsize1x4x1_ffma_aligna4_alignc4_exe…
+     12.6       3665285627        975  3759267.3  3759913.0   3663945   3785899      12438.5  sm80_xmma_gemm_f32f32_f32f32_f32_nn_n_tilesize128x64x8_stage3_warpsize2x2x1_ffma_aligna4_alignc4_ex…
+      7.1       2067883939      69840    29608.9    16737.0       704     94850      28509.6  optimizer_step/vectorized_elementwise_kernel                                                        
+      6.9       1994114925       1920  1038601.5  1038581.0   1037171   1040468        492.0  sm80_xmma_gemm_f32f32_f32f32_f32_nt_n_tilesize64x64x8_stage3_warpsize1x4x1_ffma_aligna4_alignc4_exe…
+      3.7       1068374862      16380    65224.4    26352.5      9056    228132      73107.8  elementwise_kernel                                                                                  
+      2.2        624454257      18930    32987.5    16960.0       640    115810      34577.6  vectorized_elementwise_kernel                                                                       
+      0.7        193699909       8670    22341.4    23280.5      2400     28641       5236.5  forward/elementwise_kernel                                                                          
+      0.6        170641517        960   177751.6   177683.0    160739    203044      16224.0  attention_softmax/elementwise_kernel                                                                
+      0.5        158808928        480   330851.9   330854.5    329734    332295        480.7  sm80_xmma_gemm_f32f32_f32f32_f32_nt_n_tilesize128x64x8_stage3_warpsize2x2x1_ffma_aligna4_alignc4_ex…
+      0.5        142837610        480   297578.4   297573.0    296614    299558        455.0  attention_value_matmul/sm80_xmma_gemm_f32f32_f32f32_f32_nn_n_tilesize128x32x8_stage3_warpsize2x2x1_…
+      0.5        142638092        480   297162.7   297141.5    296422    298054        363.5  sm80_xmma_gemm_f32f32_f32f32_f32_nn_n_tilesize128x32x8_stage3_warpsize2x2x1_ffma_aligna4_alignc4_ex…
+      0.5        133401409        480   277919.6   277957.0    274725    279685        590.7  attention_scores_matmul/sm80_xmma_gemm_f32f32_f32f32_f32_tn_n_tilesize128x64x8_stage3_warpsize2x2x1…
+      0.5        132764837        480   276593.4   276806.0    271845    278118       1003.3  sm80_xmma_gemm_f32f32_f32f32_f32_tn_n_tilesize128x64x8_stage3_warpsize2x2x1_ffma_aligna4_alignc4_ex…
+      0.5        131131281        480   273190.2   273157.0    272293    274437        427.3  sm80_xmma_gemm_f32f32_f32f32_f32_nt_n_tilesize128x32x8_stage3_warpsize2x2x1_ffma_aligna4_alignc4_ex…
+      0.4        127715718       7245    17628.1     6944.0       896     70785      22586.8  forward/vectorized_elementwise_kernel                                                               
+      0.3         85317548       2910    29318.7    15424.0     11104     62850      22185.7  reduce_kernel                                                                                       
+      0.3         76670272        960    79864.9    80481.5     58881     99778      18534.7  attention_softmax/reduce_kernel                                                                     
+      0.3         73521975        480   153170.8   153251.0    152483    154498        390.7  scaled_dot_product_attention/elementwise_kernel                                                     
+      0.1         38695450        480    80615.5    80674.0     79554     82113        480.6  attention_scores_matmul/vectorized_elementwise_kernel                                               
+      0.1         38200639        480    79584.7    79713.0     78465     81794        523.8  attention_softmax/vectorized_elementwise_kernel                                                     
+      0.1         18812362        480    39192.4    39169.0     38625     40225        261.2  CatArrayBatchedCopy                                                                                 
+      0.0         14371316        480    29940.2    29792.0     29504     31584        355.9  attention_value_matmul/elementwise_kernel                                                           
+      0.0         10706084        480    22304.3    22273.0     22016     23168        136.0  CatArrayBatchedCopy_aligned16_contig                                                                
+      0.0          9742003        975     9991.8    10016.0      8416     11776        598.6  forward/reduce_kernel                                                                               
+      0.0          5677466        975     5823.0     5216.0      4832     44640       4761.5  forward/index_elementwise_kernel                                                                    
+      0.0          3073031        480     6402.1     6384.5      6016      7360        189.5  _scatter_gather_elementwise_kernel                                                                  
+      0.0          2254252         15   150283.5   150179.0    149539    151715        494.6  cunn_SoftMaxBackward                                                                                
+      0.0          1228502         15    81900.1    81762.0     80994     82690        432.1  forward/cunn_SoftMaxForwardSmem                                                                     
+      0.0           874515         15    58301.0    58273.0     57473     58849        376.8  forward/nll_loss_forward_reduce_cuda_kernel_2d                                                      
+      0.0           726381        960      756.6      736.0       672      2016         96.7  forward/elementwise_kernel_with_index                                                               
+      0.0           441225         15    29415.0    29408.0     29089     29824        210.9  nll_loss_backward_reduce_cuda_kernel_2d                                                             
+      0.0           377961        480      787.4      768.0       640      1792         84.2  scaled_dot_product_attention/vectorized_elementwise_kernel                                          
+      0.0           334374         15    22291.6    22241.0     21825     23040        309.6  indexing_backward_kernel                                                                            
+      0.0           105921         15     7061.4     7072.0      6944      7136         56.2  DeviceRadixSortSingleTileKernel                                                                     
+      0.0            11744         15      782.9      768.0       736       896         53.9  elementwise_kernel_with_index                                                                       
+      0.0            11616         15      774.4      768.0       672       896         59.5  backward/vectorized_elementwise_kernel                                                              
+      0.0             2784          2     1392.0     1392.0      1344      1440         67.9  distribution_elementwise_grid_stride_kernel                                                         
+
