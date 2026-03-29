@@ -148,11 +148,11 @@ class ToyModel(nn.Module):
 
 Forward-pass timeline:
 
-![Forward memory timeline](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch1/1_1_6a/fp32_2.7b_ctx512_forward_active_memory_timeline.png)
+![Forward memory timeline](artifacts/experiments/ch1/1_1_6a/fp32_2.7b_ctx512_forward_active_memory_timeline.png)
 
 Training-step timeline:
 
-![Training memory timeline](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch1/1_1_6a/fp32_2.7b_ctx512_train_step_active_memory_timeline.png)
+![Training memory timeline](artifacts/experiments/ch1/1_1_6a/fp32_2.7b_ctx512_train_step_active_memory_timeline.png)
 
 Response:
 
