@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import math
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 import torch
 from einops import reduce, einsum
@@ -16,7 +17,19 @@ except ImportError:  # pragma: no cover - Triton is only required on CUDA hosts.
 
 
 MIN_TILE_SIZE = 16
-_FLASH_ATTENTION_TILE_SIZE_OVERRIDE: tuple[int | None, int | None] | None = None
+
+
+@dataclass(frozen=True)
+class FlashAttentionTileSizeOverride:
+    forward_q_tile_size: int | None = None
+    forward_k_tile_size: int | None = None
+    backward_dq_q_tile_size: int | None = None
+    backward_dq_k_tile_size: int | None = None
+    backward_dkdv_q_tile_size: int | None = None
+    backward_dkdv_k_tile_size: int | None = None
+
+
+_FLASH_ATTENTION_TILE_SIZE_OVERRIDE: FlashAttentionTileSizeOverride | None = None
 
 
 def _resolve_tile_size_override(
@@ -38,8 +51,12 @@ def _resolve_tile_size_override(
 @contextmanager
 def flash_attention_tile_size_override(
     *,
-    q_tile_size: int | None = None,
-    k_tile_size: int | None = None,
+    forward_q_tile_size: int | None = None,
+    forward_k_tile_size: int | None = None,
+    backward_dq_q_tile_size: int | None = None,
+    backward_dq_k_tile_size: int | None = None,
+    backward_dkdv_q_tile_size: int | None = None,
+    backward_dkdv_k_tile_size: int | None = None,
 ):
     """
     Temporarily override the tile sizes used by FlashAttention helpers.
@@ -49,7 +66,14 @@ def flash_attention_tile_size_override(
     """
     global _FLASH_ATTENTION_TILE_SIZE_OVERRIDE
     previous_override = _FLASH_ATTENTION_TILE_SIZE_OVERRIDE
-    _FLASH_ATTENTION_TILE_SIZE_OVERRIDE = (q_tile_size, k_tile_size)
+    _FLASH_ATTENTION_TILE_SIZE_OVERRIDE = FlashAttentionTileSizeOverride(
+        forward_q_tile_size=forward_q_tile_size,
+        forward_k_tile_size=forward_k_tile_size,
+        backward_dq_q_tile_size=backward_dq_q_tile_size,
+        backward_dq_k_tile_size=backward_dq_k_tile_size,
+        backward_dkdv_q_tile_size=backward_dkdv_q_tile_size,
+        backward_dkdv_k_tile_size=backward_dkdv_k_tile_size,
+    )
     try:
         yield
     finally:
@@ -75,31 +99,120 @@ def _validate_flash_attention_inputs(
         raise ValueError("Expected q, k, and v to be on the same device.")
 
 
-def _choose_query_tile_size(n_queries: int) -> int:
-    # Handout guidance: choose tiles at least 16x16 for the tiled implementation.
+def _default_tile_size(n_tokens: int) -> int:
+    return min(n_tokens, MIN_TILE_SIZE)
+
+
+def _resolve_pass_tile_size_override(
+    *,
+    n_tokens: int,
+    axis_name: str,
+    pass_specific_tile_size: int | None,
+) -> int | None:
+    overridden_tile_size = _resolve_tile_size_override(
+        pass_specific_tile_size,
+        n_tokens=n_tokens,
+        axis_name=axis_name,
+    )
+    if overridden_tile_size is not None:
+        return overridden_tile_size
+    return None
+
+
+def _choose_forward_query_tile_size(n_queries: int) -> int:
     if _FLASH_ATTENTION_TILE_SIZE_OVERRIDE is not None:
-        q_tile_size, _ = _FLASH_ATTENTION_TILE_SIZE_OVERRIDE
-        overridden_tile_size = _resolve_tile_size_override(
-            q_tile_size,
+        overridden_tile_size = _resolve_pass_tile_size_override(
             n_tokens=n_queries,
-            axis_name="query",
+            axis_name="forward query",
+            pass_specific_tile_size=_FLASH_ATTENTION_TILE_SIZE_OVERRIDE.forward_q_tile_size,
         )
         if overridden_tile_size is not None:
             return overridden_tile_size
-    return min(n_queries, MIN_TILE_SIZE)
+    return _default_tile_size(n_queries)
 
 
-def _choose_key_tile_size(n_keys: int) -> int:
+def _choose_forward_key_tile_size(n_keys: int) -> int:
     if _FLASH_ATTENTION_TILE_SIZE_OVERRIDE is not None:
-        _, k_tile_size = _FLASH_ATTENTION_TILE_SIZE_OVERRIDE
-        overridden_tile_size = _resolve_tile_size_override(
-            k_tile_size,
+        overridden_tile_size = _resolve_pass_tile_size_override(
             n_tokens=n_keys,
-            axis_name="key",
+            axis_name="forward key",
+            pass_specific_tile_size=_FLASH_ATTENTION_TILE_SIZE_OVERRIDE.forward_k_tile_size,
         )
         if overridden_tile_size is not None:
             return overridden_tile_size
-    return min(n_keys, MIN_TILE_SIZE)
+    return _default_tile_size(n_keys)
+
+
+def _get_forward_manual_tile_sizes(
+    n_queries: int,
+    n_keys: int,
+) -> tuple[int, int] | None:
+    if _FLASH_ATTENTION_TILE_SIZE_OVERRIDE is None:
+        return None
+    q_tile_size = _resolve_tile_size_override(
+        _FLASH_ATTENTION_TILE_SIZE_OVERRIDE.forward_q_tile_size,
+        n_tokens=n_queries,
+        axis_name="forward query",
+    )
+    k_tile_size = _resolve_tile_size_override(
+        _FLASH_ATTENTION_TILE_SIZE_OVERRIDE.forward_k_tile_size,
+        n_tokens=n_keys,
+        axis_name="forward key",
+    )
+    if q_tile_size is None and k_tile_size is None:
+        return None
+    return (
+        q_tile_size if q_tile_size is not None else _default_tile_size(n_queries),
+        k_tile_size if k_tile_size is not None else _default_tile_size(n_keys),
+    )
+
+
+def _get_backward_dq_manual_tile_sizes(
+    n_queries: int,
+    n_keys: int,
+) -> tuple[int, int] | None:
+    if _FLASH_ATTENTION_TILE_SIZE_OVERRIDE is None:
+        return None
+    q_tile_size = _resolve_tile_size_override(
+        _FLASH_ATTENTION_TILE_SIZE_OVERRIDE.backward_dq_q_tile_size,
+        n_tokens=n_queries,
+        axis_name="backward dQ query",
+    )
+    k_tile_size = _resolve_tile_size_override(
+        _FLASH_ATTENTION_TILE_SIZE_OVERRIDE.backward_dq_k_tile_size,
+        n_tokens=n_keys,
+        axis_name="backward dQ key",
+    )
+    if q_tile_size is None and k_tile_size is None:
+        return None
+    return (
+        q_tile_size if q_tile_size is not None else _default_tile_size(n_queries),
+        k_tile_size if k_tile_size is not None else _default_tile_size(n_keys),
+    )
+
+
+def _get_backward_dkdv_manual_tile_sizes(
+    n_queries: int,
+    n_keys: int,
+) -> tuple[int, int] | None:
+    if _FLASH_ATTENTION_TILE_SIZE_OVERRIDE is None:
+        return None
+    q_tile_size = _resolve_tile_size_override(
+        _FLASH_ATTENTION_TILE_SIZE_OVERRIDE.backward_dkdv_q_tile_size,
+        n_tokens=n_queries,
+        axis_name="backward dKdV query",
+    )
+    k_tile_size = _resolve_tile_size_override(
+        _FLASH_ATTENTION_TILE_SIZE_OVERRIDE.backward_dkdv_k_tile_size,
+        n_tokens=n_keys,
+        axis_name="backward dKdV key",
+    )
+    if q_tile_size is None and k_tile_size is None:
+        return None
+    return (
+        q_tile_size if q_tile_size is not None else _default_tile_size(n_queries),
+        k_tile_size if k_tile_size is not None else _default_tile_size(n_keys),
+    )
 
 
 # Forward helpers
@@ -139,6 +252,16 @@ def flash_attention_forward_reference(
 
 
 if triton is not None:
+    _FLASH_ATTENTION_AUTOTUNE_CONFIGS = [
+        triton.Config(kwargs={"Q_TILE_SIZE": 16, "K_TILE_SIZE": 16}, num_warps=4, num_stages=3),
+        triton.Config(kwargs={"Q_TILE_SIZE": 16, "K_TILE_SIZE": 32}, num_warps=4, num_stages=3),
+        triton.Config(kwargs={"Q_TILE_SIZE": 32, "K_TILE_SIZE": 16}, num_warps=4, num_stages=3),
+        triton.Config(kwargs={"Q_TILE_SIZE": 32, "K_TILE_SIZE": 32}, num_warps=4, num_stages=3),
+        triton.Config(kwargs={"Q_TILE_SIZE": 32, "K_TILE_SIZE": 64}, num_warps=4, num_stages=3),
+        triton.Config(kwargs={"Q_TILE_SIZE": 64, "K_TILE_SIZE": 32}, num_warps=4, num_stages=3),
+        triton.Config(kwargs={"Q_TILE_SIZE": 64, "K_TILE_SIZE": 64}, num_warps=4, num_stages=3),
+    ]
+
     @triton.jit
     def flash_attention_forward_kernel(
         q_ptr, k_ptr, v_ptr, o_ptr, l_ptr,
@@ -243,6 +366,12 @@ if triton is not None:
         output_to_store = output_tile.to(output_block_ptr.type.element_ty)
         tl.store(output_block_ptr, output_to_store, boundary_check=(0, 1))
         tl.store(logsumexp_block_ptr, logsumexp_tile, boundary_check=(0,))
+
+
+    flash_attention_forward_autotuned_kernel = triton.autotune(
+        configs=_FLASH_ATTENTION_AUTOTUNE_CONFIGS,
+        key=["N_QUERIES", "N_KEYS", "D", "IS_CAUSAL"],
+    )(flash_attention_forward_kernel)
 
 
     @triton.jit
@@ -421,6 +550,12 @@ if triton is not None:
         tl.store(grad_v_block_ptr, grad_v_tile.to(grad_v_block_ptr.type.element_ty), boundary_check=(0, 1))
 
 
+    flash_attention_backward_dkdv_autotuned_kernel = triton.autotune(
+        configs=_FLASH_ATTENTION_AUTOTUNE_CONFIGS,
+        key=["N_QUERIES", "N_KEYS", "D", "IS_CAUSAL"],
+    )(flash_attention_backward_dkdv_kernel)
+
+
 
     @triton.jit
     def flash_attention_backward_dq_kernel(
@@ -534,14 +669,23 @@ if triton is not None:
             value_block_ptr = tl.advance(value_block_ptr, (K_TILE_SIZE, 0))
         grad_q_tile = grad_q_tile * scale
         tl.store(grad_q_block_ptr, grad_q_tile.to(grad_q_block_ptr.type.element_ty), boundary_check=(0, 1))
+
+
+    flash_attention_backward_dq_autotuned_kernel = triton.autotune(
+        configs=_FLASH_ATTENTION_AUTOTUNE_CONFIGS,
+        key=["N_QUERIES", "N_KEYS", "D", "IS_CAUSAL"],
+    )(flash_attention_backward_dq_kernel)
         
 
 
 else:
     flash_attention_forward_kernel = None
+    flash_attention_forward_autotuned_kernel = None
     flash_attention_backward_delta_kernel = None
     flash_attention_backward_dkdv_kernel = None
+    flash_attention_backward_dkdv_autotuned_kernel = None
     flash_attention_backward_dq_kernel = None
+    flash_attention_backward_dq_autotuned_kernel = None
 
 
 def _flash_attention_forward_pytorch_tiled(
@@ -627,8 +771,6 @@ def _flash_attention_forward_triton(
     k: torch.Tensor,
     v: torch.Tensor,
     *,
-    q_tile_size: int,
-    k_tile_size: int,
     is_causal: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     _validate_flash_attention_inputs(q, k, v)
@@ -643,21 +785,37 @@ def _flash_attention_forward_triton(
     scale = q.shape[-1] ** -0.5
     output = torch.empty_like(q)
     logsumexp = torch.empty((batch_size, n_queries), dtype=torch.float32, device=q.device)
-    grid = (triton.cdiv(n_queries, q_tile_size), batch_size)
+    manual_tile_sizes = _get_forward_manual_tile_sizes(n_queries, n_keys)
 
-    flash_attention_forward_kernel[grid](
-        q, k, v, output, logsumexp,
-        q.stride(0), q.stride(1), q.stride(2),
-        k.stride(0), k.stride(1), k.stride(2),
-        v.stride(0), v.stride(1), v.stride(2),
-        output.stride(0), output.stride(1), output.stride(2),
-        logsumexp.stride(0), logsumexp.stride(1),
-        n_queries, n_keys, scale,
-        D=d,
-        Q_TILE_SIZE=q_tile_size,
-        K_TILE_SIZE=k_tile_size,
-        IS_CAUSAL=is_causal,
-    )
+    if manual_tile_sizes is not None:
+        q_tile_size, k_tile_size = manual_tile_sizes
+        grid = (triton.cdiv(n_queries, q_tile_size), batch_size)
+        flash_attention_forward_kernel[grid](
+            q, k, v, output, logsumexp,
+            q.stride(0), q.stride(1), q.stride(2),
+            k.stride(0), k.stride(1), k.stride(2),
+            v.stride(0), v.stride(1), v.stride(2),
+            output.stride(0), output.stride(1), output.stride(2),
+            logsumexp.stride(0), logsumexp.stride(1),
+            n_queries, n_keys, scale,
+            D=d,
+            Q_TILE_SIZE=q_tile_size,
+            K_TILE_SIZE=k_tile_size,
+            IS_CAUSAL=is_causal,
+        )
+    else:
+        grid = lambda META: (triton.cdiv(n_queries, META["Q_TILE_SIZE"]), batch_size)
+        flash_attention_forward_autotuned_kernel[grid](
+            q, k, v, output, logsumexp,
+            q.stride(0), q.stride(1), q.stride(2),
+            k.stride(0), k.stride(1), k.stride(2),
+            v.stride(0), v.stride(1), v.stride(2),
+            output.stride(0), output.stride(1), output.stride(2),
+            logsumexp.stride(0), logsumexp.stride(1),
+            n_queries, n_keys, scale,
+            D=d,
+            IS_CAUSAL=is_causal,
+        )
     return output, logsumexp
 
 
@@ -708,8 +866,8 @@ def _flash_attention_backward_triton(
     grad_o: torch.Tensor,
     lse: torch.Tensor,
     *,
-    q_tile_size: int,
-    k_tile_size: int,
+    manual_backward_dq_tile_sizes: tuple[int, int] | None = None,
+    manual_backward_dkdv_tile_sizes: tuple[int, int] | None = None,
     is_causal: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Triton backward entry point for FlashAttention."""
@@ -722,48 +880,95 @@ def _flash_attention_backward_triton(
     grad_k = torch.empty_like(k)
     grad_v = torch.empty_like(v)
 
+    backward_dq_manual_tile_sizes = manual_backward_dq_tile_sizes
+    if backward_dq_manual_tile_sizes is None:
+        backward_dq_manual_tile_sizes = _get_backward_dq_manual_tile_sizes(q.shape[-2], k.shape[-2])
+    backward_dkdv_manual_tile_sizes = manual_backward_dkdv_tile_sizes
+    if backward_dkdv_manual_tile_sizes is None:
+        backward_dkdv_manual_tile_sizes = _get_backward_dkdv_manual_tile_sizes(q.shape[-2], k.shape[-2])
+    delta_q_tile_size = (
+        backward_dq_manual_tile_sizes[0]
+        if backward_dq_manual_tile_sizes is not None
+        else _default_tile_size(q.shape[-2])
+    )
     delta = _flash_attention_backward_delta_triton(
         o,
         grad_o,
-        q_tile_size=q_tile_size,
+        q_tile_size=delta_q_tile_size,
     )
     batch_size, n_queries, d = q.shape
     n_keys = k.shape[-2]
     scale = q.shape[-1] ** -0.5
 
-    dkdv_grid = (triton.cdiv(n_keys, k_tile_size), batch_size)
-    flash_attention_backward_dkdv_kernel[dkdv_grid](
-        q, k, v, grad_o, lse, delta, grad_k, grad_v,
-        q.stride(0), q.stride(1), q.stride(2),
-        k.stride(0), k.stride(1), k.stride(2),
-        v.stride(0), v.stride(1), v.stride(2),
-        grad_o.stride(0), grad_o.stride(1), grad_o.stride(2),
-        lse.stride(0), lse.stride(1),
-        delta.stride(0), delta.stride(1),
-        grad_k.stride(0), grad_k.stride(1), grad_k.stride(2),
-        grad_v.stride(0), grad_v.stride(1), grad_v.stride(2),
-        n_queries, n_keys, scale,
-        D=d,
-        Q_TILE_SIZE=q_tile_size,
-        K_TILE_SIZE=k_tile_size,
-        IS_CAUSAL=is_causal,
-    )
-    dq_grid = (triton.cdiv(n_queries, q_tile_size), batch_size)
-    flash_attention_backward_dq_kernel[dq_grid](
-        q, k, v, grad_o, lse, delta, grad_q,
-        q.stride(0), q.stride(1), q.stride(2),
-        k.stride(0), k.stride(1), k.stride(2),
-        v.stride(0), v.stride(1), v.stride(2),
-        grad_o.stride(0), grad_o.stride(1), grad_o.stride(2),
-        lse.stride(0), lse.stride(1),
-        delta.stride(0), delta.stride(1),
-        grad_q.stride(0), grad_q.stride(1), grad_q.stride(2),
-        n_queries, n_keys, scale,
-        D=d,
-        Q_TILE_SIZE=q_tile_size,
-        K_TILE_SIZE=k_tile_size,
-        IS_CAUSAL=is_causal,
-    )
+    if backward_dkdv_manual_tile_sizes is not None:
+        backward_dkdv_q_tile_size, backward_dkdv_k_tile_size = backward_dkdv_manual_tile_sizes
+        dkdv_grid = (triton.cdiv(n_keys, backward_dkdv_k_tile_size), batch_size)
+        flash_attention_backward_dkdv_kernel[dkdv_grid](
+            q, k, v, grad_o, lse, delta, grad_k, grad_v,
+            q.stride(0), q.stride(1), q.stride(2),
+            k.stride(0), k.stride(1), k.stride(2),
+            v.stride(0), v.stride(1), v.stride(2),
+            grad_o.stride(0), grad_o.stride(1), grad_o.stride(2),
+            lse.stride(0), lse.stride(1),
+            delta.stride(0), delta.stride(1),
+            grad_k.stride(0), grad_k.stride(1), grad_k.stride(2),
+            grad_v.stride(0), grad_v.stride(1), grad_v.stride(2),
+            n_queries, n_keys, scale,
+            D=d,
+            Q_TILE_SIZE=backward_dkdv_q_tile_size,
+            K_TILE_SIZE=backward_dkdv_k_tile_size,
+            IS_CAUSAL=is_causal,
+        )
+    else:
+        dkdv_grid = lambda META: (triton.cdiv(n_keys, META["K_TILE_SIZE"]), batch_size)
+        flash_attention_backward_dkdv_autotuned_kernel[dkdv_grid](
+            q, k, v, grad_o, lse, delta, grad_k, grad_v,
+            q.stride(0), q.stride(1), q.stride(2),
+            k.stride(0), k.stride(1), k.stride(2),
+            v.stride(0), v.stride(1), v.stride(2),
+            grad_o.stride(0), grad_o.stride(1), grad_o.stride(2),
+            lse.stride(0), lse.stride(1),
+            delta.stride(0), delta.stride(1),
+            grad_k.stride(0), grad_k.stride(1), grad_k.stride(2),
+            grad_v.stride(0), grad_v.stride(1), grad_v.stride(2),
+            n_queries, n_keys, scale,
+            D=d,
+            IS_CAUSAL=is_causal,
+        )
+
+    if backward_dq_manual_tile_sizes is not None:
+        backward_dq_q_tile_size, backward_dq_k_tile_size = backward_dq_manual_tile_sizes
+        dq_grid = (triton.cdiv(n_queries, backward_dq_q_tile_size), batch_size)
+        flash_attention_backward_dq_kernel[dq_grid](
+            q, k, v, grad_o, lse, delta, grad_q,
+            q.stride(0), q.stride(1), q.stride(2),
+            k.stride(0), k.stride(1), k.stride(2),
+            v.stride(0), v.stride(1), v.stride(2),
+            grad_o.stride(0), grad_o.stride(1), grad_o.stride(2),
+            lse.stride(0), lse.stride(1),
+            delta.stride(0), delta.stride(1),
+            grad_q.stride(0), grad_q.stride(1), grad_q.stride(2),
+            n_queries, n_keys, scale,
+            D=d,
+            Q_TILE_SIZE=backward_dq_q_tile_size,
+            K_TILE_SIZE=backward_dq_k_tile_size,
+            IS_CAUSAL=is_causal,
+        )
+    else:
+        dq_grid = lambda META: (triton.cdiv(n_queries, META["Q_TILE_SIZE"]), batch_size)
+        flash_attention_backward_dq_autotuned_kernel[dq_grid](
+            q, k, v, grad_o, lse, delta, grad_q,
+            q.stride(0), q.stride(1), q.stride(2),
+            k.stride(0), k.stride(1), k.stride(2),
+            v.stride(0), v.stride(1), v.stride(2),
+            grad_o.stride(0), grad_o.stride(1), grad_o.stride(2),
+            lse.stride(0), lse.stride(1),
+            delta.stride(0), delta.stride(1),
+            grad_q.stride(0), grad_q.stride(1), grad_q.stride(2),
+            n_queries, n_keys, scale,
+            D=d,
+            IS_CAUSAL=is_causal,
+        )
     return grad_q, grad_k, grad_v
 
 
@@ -777,23 +982,20 @@ class FlashAttention2TritonFunction(torch.autograd.Function):
         is_causal: bool = False,
     ) -> torch.Tensor:
         _validate_flash_attention_inputs(q, k, v)
-
-        q_tile_size = _choose_query_tile_size(q.shape[-2])
-        k_tile_size = _choose_key_tile_size(k.shape[-2])
+        manual_backward_dq_tile_sizes = _get_backward_dq_manual_tile_sizes(q.shape[-2], k.shape[-2])
+        manual_backward_dkdv_tile_sizes = _get_backward_dkdv_manual_tile_sizes(q.shape[-2], k.shape[-2])
 
         output, logsumexp = _flash_attention_forward_triton(
             q,
             k,
             v,
-            q_tile_size=q_tile_size,
-            k_tile_size=k_tile_size,
             is_causal=is_causal,
         )
 
         ctx.save_for_backward(logsumexp, q, k, v, output)
         ctx.is_causal = is_causal
-        ctx.q_tile_size = q_tile_size
-        ctx.k_tile_size = k_tile_size
+        ctx.manual_backward_dq_tile_sizes = manual_backward_dq_tile_sizes
+        ctx.manual_backward_dkdv_tile_sizes = manual_backward_dkdv_tile_sizes
         return output
 
     @staticmethod
@@ -810,8 +1012,8 @@ class FlashAttention2TritonFunction(torch.autograd.Function):
             output,
             grad_o,
             logsumexp,
-            q_tile_size=ctx.q_tile_size,
-            k_tile_size=ctx.k_tile_size,
+            manual_backward_dq_tile_sizes=ctx.manual_backward_dq_tile_sizes,
+            manual_backward_dkdv_tile_sizes=ctx.manual_backward_dkdv_tile_sizes,
             is_causal=ctx.is_causal,
         )
         return grad_q, grad_k, grad_v, None
@@ -935,8 +1137,8 @@ class FlashAttention2PyTorchFunction(torch.autograd.Function):
     ) -> torch.Tensor:
         _validate_flash_attention_inputs(q, k, v)
 
-        q_tile_size = _choose_query_tile_size(q.shape[-2])
-        k_tile_size = _choose_key_tile_size(k.shape[-2])
+        q_tile_size = _choose_forward_query_tile_size(q.shape[-2])
+        k_tile_size = _choose_forward_key_tile_size(k.shape[-2])
 
         output, logsumexp = _flash_attention_forward_pytorch_tiled(
             q,

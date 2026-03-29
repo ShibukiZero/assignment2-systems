@@ -3,17 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
 import torch
 
-from cs336_systems.flash_attention import (
-    FlashAttention2TritonFunction,
-    flash_attention_tile_size_override,
-)
+from cs336_systems.flash_attention import FlashAttention2TritonFunction
 
 try:
     import triton.testing
@@ -37,8 +33,6 @@ class FlashLeaderboardBenchmarkConfig:
     device: str
     is_causal: bool
     compile_flash: bool
-    q_tile_size: int | None
-    k_tile_size: int | None
     output_path: str | None
 
 
@@ -85,18 +79,6 @@ def parse_args() -> FlashLeaderboardBenchmarkConfig:
         help="Disable torch.compile around FlashAttention2TritonFunction.apply.",
     )
     parser.add_argument(
-        "--q-tile-size",
-        type=int,
-        default=None,
-        help="Optional query tile size override for leaderboard tuning.",
-    )
-    parser.add_argument(
-        "--k-tile-size",
-        type=int,
-        default=None,
-        help="Optional key tile size override for leaderboard tuning.",
-    )
-    parser.add_argument(
         "--output-path",
         type=str,
         default=None,
@@ -115,8 +97,6 @@ def parse_args() -> FlashLeaderboardBenchmarkConfig:
         device=args.device,
         is_causal=True,
         compile_flash=not args.no_compile_flash,
-        q_tile_size=args.q_tile_size,
-        k_tile_size=args.k_tile_size,
         output_path=args.output_path,
     )
 
@@ -159,16 +139,7 @@ def make_flash_runner(config: FlashLeaderboardBenchmarkConfig):
         flash_impl = torch.compile(flash_impl)
 
     def flash_forward_backward(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> None:
-        override_context = (
-            flash_attention_tile_size_override(
-                q_tile_size=config.q_tile_size,
-                k_tile_size=config.k_tile_size,
-            )
-            if config.q_tile_size is not None or config.k_tile_size is not None
-            else nullcontext()
-        )
-        with override_context:
-            output = flash_impl(q, k, v, config.is_causal)
+        output = flash_impl(q, k, v, config.is_causal)
         loss = output.sum()
         loss.backward()
 
@@ -234,8 +205,7 @@ def format_config_label(config: FlashLeaderboardBenchmarkConfig) -> str:
     return (
         f"batch={config.batch_size}, heads={config.num_heads}, seq={config.sequence_length}, "
         f"d_head={config.d_head}, precision={config.precision}, causal={config.is_causal}, "
-        f"compile={config.compile_flash}, q_tile={config.q_tile_size}, "
-        f"k_tile={config.k_tile_size}"
+        f"compile={config.compile_flash}, autotune_qk_tiles=True"
     )
 
 

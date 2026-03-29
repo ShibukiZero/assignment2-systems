@@ -333,8 +333,12 @@ def benchmark_flash_attention_case(
 
     def flash_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
         with flash_attention_tile_size_override(
-            q_tile_size=case.q_tile_size,
-            k_tile_size=case.k_tile_size,
+            forward_q_tile_size=case.q_tile_size,
+            forward_k_tile_size=case.k_tile_size,
+            backward_dq_q_tile_size=case.q_tile_size,
+            backward_dq_k_tile_size=case.k_tile_size,
+            backward_dkdv_q_tile_size=case.q_tile_size,
+            backward_dkdv_k_tile_size=case.k_tile_size,
         ):
             return FlashAttention2TritonFunction.apply(q, k, v, case.is_causal)
 
