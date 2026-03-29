@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import functools
+import json
 import math
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 from einops import reduce, einsum
@@ -17,6 +19,7 @@ except ImportError:  # pragma: no cover - Triton is only required on CUDA hosts.
 
 
 MIN_TILE_SIZE = 16
+_AUTOTUNE_CONFIG_PATH = Path(__file__).with_name("flash_attention_autotune_configs.json")
 
 
 @dataclass(frozen=True)
@@ -101,6 +104,50 @@ def _validate_flash_attention_inputs(
 
 def _default_tile_size(n_tokens: int) -> int:
     return min(n_tokens, MIN_TILE_SIZE)
+
+
+def _load_autotune_config_specs() -> dict[str, list[dict[str, int]]]:
+    raw_payload = json.loads(_AUTOTUNE_CONFIG_PATH.read_text(encoding="utf-8"))
+    if not isinstance(raw_payload, dict):
+        raise ValueError("Expected autotune config JSON payload to be a mapping.")
+    return raw_payload
+
+
+def _build_autotune_configs(
+    payload: dict[str, list[dict[str, int]]],
+    kernel_name: str,
+) -> list["triton.Config"]:
+    raw_configs = payload.get(kernel_name)
+    if not isinstance(raw_configs, list) or not raw_configs:
+        raise ValueError(f"Expected a non-empty config list for kernel '{kernel_name}'.")
+
+    configs: list[triton.Config] = []
+    for raw_config in raw_configs:
+        if not isinstance(raw_config, dict):
+            raise ValueError(f"Expected autotune config entries for '{kernel_name}' to be objects.")
+
+        q_tile_size = raw_config.get("Q_TILE_SIZE")
+        k_tile_size = raw_config.get("K_TILE_SIZE")
+        num_warps = raw_config.get("num_warps", 4)
+        num_stages = raw_config.get("num_stages", 3)
+
+        if not isinstance(q_tile_size, int) or not isinstance(k_tile_size, int):
+            raise ValueError(
+                f"Each autotune config for '{kernel_name}' must provide integer "
+                "Q_TILE_SIZE and K_TILE_SIZE values."
+            )
+
+        configs.append(
+            triton.Config(
+                kwargs={
+                    "Q_TILE_SIZE": q_tile_size,
+                    "K_TILE_SIZE": k_tile_size,
+                },
+                num_warps=num_warps,
+                num_stages=num_stages,
+            )
+        )
+    return configs
 
 
 def _resolve_pass_tile_size_override(
@@ -252,15 +299,19 @@ def flash_attention_forward_reference(
 
 
 if triton is not None:
-    _FLASH_ATTENTION_AUTOTUNE_CONFIGS = [
-        triton.Config(kwargs={"Q_TILE_SIZE": 16, "K_TILE_SIZE": 16}, num_warps=4, num_stages=3),
-        triton.Config(kwargs={"Q_TILE_SIZE": 16, "K_TILE_SIZE": 32}, num_warps=4, num_stages=3),
-        triton.Config(kwargs={"Q_TILE_SIZE": 32, "K_TILE_SIZE": 16}, num_warps=4, num_stages=3),
-        triton.Config(kwargs={"Q_TILE_SIZE": 32, "K_TILE_SIZE": 32}, num_warps=4, num_stages=3),
-        triton.Config(kwargs={"Q_TILE_SIZE": 32, "K_TILE_SIZE": 64}, num_warps=4, num_stages=3),
-        triton.Config(kwargs={"Q_TILE_SIZE": 64, "K_TILE_SIZE": 32}, num_warps=4, num_stages=3),
-        triton.Config(kwargs={"Q_TILE_SIZE": 64, "K_TILE_SIZE": 64}, num_warps=4, num_stages=3),
-    ]
+    _FLASH_ATTENTION_AUTOTUNE_CONFIG_SPECS = _load_autotune_config_specs()
+    _FLASH_ATTENTION_FORWARD_AUTOTUNE_CONFIGS = _build_autotune_configs(
+        _FLASH_ATTENTION_AUTOTUNE_CONFIG_SPECS,
+        "forward",
+    )
+    _FLASH_ATTENTION_BACKWARD_DQ_AUTOTUNE_CONFIGS = _build_autotune_configs(
+        _FLASH_ATTENTION_AUTOTUNE_CONFIG_SPECS,
+        "backward_dq",
+    )
+    _FLASH_ATTENTION_BACKWARD_DKDV_AUTOTUNE_CONFIGS = _build_autotune_configs(
+        _FLASH_ATTENTION_AUTOTUNE_CONFIG_SPECS,
+        "backward_dkdv",
+    )
 
     @triton.jit
     def flash_attention_forward_kernel(
@@ -369,7 +420,7 @@ if triton is not None:
 
 
     flash_attention_forward_autotuned_kernel = triton.autotune(
-        configs=_FLASH_ATTENTION_AUTOTUNE_CONFIGS,
+        configs=_FLASH_ATTENTION_FORWARD_AUTOTUNE_CONFIGS,
         key=["N_QUERIES", "N_KEYS", "D", "IS_CAUSAL"],
     )(flash_attention_forward_kernel)
 
@@ -551,7 +602,7 @@ if triton is not None:
 
 
     flash_attention_backward_dkdv_autotuned_kernel = triton.autotune(
-        configs=_FLASH_ATTENTION_AUTOTUNE_CONFIGS,
+        configs=_FLASH_ATTENTION_BACKWARD_DKDV_AUTOTUNE_CONFIGS,
         key=["N_QUERIES", "N_KEYS", "D", "IS_CAUSAL"],
     )(flash_attention_backward_dkdv_kernel)
 
@@ -672,7 +723,7 @@ if triton is not None:
 
 
     flash_attention_backward_dq_autotuned_kernel = triton.autotune(
-        configs=_FLASH_ATTENTION_AUTOTUNE_CONFIGS,
+        configs=_FLASH_ATTENTION_BACKWARD_DQ_AUTOTUNE_CONFIGS,
         key=["N_QUERIES", "N_KEYS", "D", "IS_CAUSAL"],
     )(flash_attention_backward_dq_kernel)
         
