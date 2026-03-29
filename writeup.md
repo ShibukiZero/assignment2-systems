@@ -391,6 +391,14 @@ The train-step speedup is smaller across the board and becomes quite limited for
 
 ---
 
+## Problem `flash_leaderboard`: FlashAttention-2 Leaderboard
+
+**Answer:** We optimized the leaderboard implementation in three main steps: first by replacing the PyTorch recomputation backward path with Triton backward kernels, then by adding tile-level causal early skipping, and finally by introducing a separate autotuning search script that searches per-kernel `(Q_TILE_SIZE, K_TILE_SIZE, num_warps, num_stages)` configurations and exports the best result back into the default config JSON. The current exported top-1 configuration is `Q_TILE_SIZE=64`, `K_TILE_SIZE=64`, `num_warps=4`, `num_stages=2` for the forward, `dQ`, and `dK/dV` kernels.
+
+Using the current default best-config JSON, our final handout-style leaderboard benchmark on a single NVIDIA H800 at BF16 with causal masking, batch size `1`, sequence length `16384`, and `16` heads of size `64` measured `14.49 ms` for the combined forward-backward pass. This number was obtained with `torch.compile` enabled and the handout benchmark window `warmup=1000 ms`, `rep=10000 ms`.
+
+---
+
 ## Problem `distributed_communication_single_node`: Distributed Communication on a Single Node (5 points)
 
 ### (a)
