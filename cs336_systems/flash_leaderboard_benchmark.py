@@ -9,6 +9,7 @@ from typing import Literal
 
 import torch
 
+import cs336_systems.flash_attention as flash_attention_module
 from cs336_systems.flash_attention import FlashAttention2TritonFunction
 
 try:
@@ -170,8 +171,14 @@ def build_payload(
     config: FlashLeaderboardBenchmarkConfig,
     device: torch.device,
     latency_ms: float,
+    flash_attention_module=flash_attention_module,
 ) -> dict[str, object]:
     effective_batch = config.batch_size * config.num_heads
+    best_config_fn = getattr(
+        flash_attention_module,
+        "get_flash_attention_best_configs",
+        None,
+    )
     return {
         "benchmark": "flash_leaderboard",
         "config": asdict(config),
@@ -188,6 +195,7 @@ def build_payload(
         },
         "results": {
             "forward_backward_ms": latency_ms,
+            "best_configs": best_config_fn() if callable(best_config_fn) else {},
         },
     }
 

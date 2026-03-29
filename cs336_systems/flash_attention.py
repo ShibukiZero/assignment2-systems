@@ -150,6 +150,43 @@ def _build_autotune_configs(
     return configs
 
 
+def _serialize_triton_config(config: "triton.Config | None") -> dict[str, int] | None:
+    if config is None:
+        return None
+
+    serialized = {
+        "Q_TILE_SIZE": int(config.kwargs["Q_TILE_SIZE"]),
+        "K_TILE_SIZE": int(config.kwargs["K_TILE_SIZE"]),
+        "num_warps": int(config.num_warps),
+        "num_stages": int(config.num_stages),
+    }
+    return serialized
+
+
+def get_flash_attention_best_configs() -> dict[str, dict[str, int] | None]:
+    if triton is None:
+        return {}
+    return {
+        "forward": _serialize_triton_config(
+            getattr(flash_attention_forward_autotuned_kernel, "best_config", None)
+        ),
+        "backward_dq": _serialize_triton_config(
+            getattr(flash_attention_backward_dq_autotuned_kernel, "best_config", None)
+        ),
+        "backward_dkdv": _serialize_triton_config(
+            getattr(flash_attention_backward_dkdv_autotuned_kernel, "best_config", None)
+        ),
+    }
+
+
+def get_flash_attention_autotune_candidate_counts() -> dict[str, int]:
+    configs_by_kernel = _load_autotune_config_payload()
+    return {
+        kernel_name: len(kernel_configs)
+        for kernel_name, kernel_configs in configs_by_kernel.items()
+    }
+
+
 def _resolve_pass_tile_size_override(
     *,
     n_tokens: int,

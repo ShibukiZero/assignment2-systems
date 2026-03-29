@@ -1,56 +1,26 @@
 {
   "forward": [
-    {"Q_TILE_SIZE": 16, "K_TILE_SIZE": 16},
-    {"Q_TILE_SIZE": 16, "K_TILE_SIZE": 32},
-    {"Q_TILE_SIZE": 16, "K_TILE_SIZE": 64},
-    {"Q_TILE_SIZE": 16, "K_TILE_SIZE": 128},
-    {"Q_TILE_SIZE": 32, "K_TILE_SIZE": 16},
-    {"Q_TILE_SIZE": 32, "K_TILE_SIZE": 32},
-    {"Q_TILE_SIZE": 32, "K_TILE_SIZE": 64},
-    {"Q_TILE_SIZE": 32, "K_TILE_SIZE": 128},
-    {"Q_TILE_SIZE": 64, "K_TILE_SIZE": 16},
-    {"Q_TILE_SIZE": 64, "K_TILE_SIZE": 32},
-    {"Q_TILE_SIZE": 64, "K_TILE_SIZE": 64},
-    {"Q_TILE_SIZE": 64, "K_TILE_SIZE": 128},
-    {"Q_TILE_SIZE": 128, "K_TILE_SIZE": 16},
-    {"Q_TILE_SIZE": 128, "K_TILE_SIZE": 32},
-    {"Q_TILE_SIZE": 128, "K_TILE_SIZE": 64},
-    {"Q_TILE_SIZE": 128, "K_TILE_SIZE": 128}
+    {
+      "Q_TILE_SIZE": 64,
+      "K_TILE_SIZE": 64,
+      "num_warps": 4,
+      "num_stages": 2
+    }
   ],
   "backward_dq": [
-    {"Q_TILE_SIZE": 16, "K_TILE_SIZE": 16},
-    {"Q_TILE_SIZE": 16, "K_TILE_SIZE": 32},
-    {"Q_TILE_SIZE": 16, "K_TILE_SIZE": 64},
-    {"Q_TILE_SIZE": 16, "K_TILE_SIZE": 128},
-    {"Q_TILE_SIZE": 32, "K_TILE_SIZE": 16},
-    {"Q_TILE_SIZE": 32, "K_TILE_SIZE": 32},
-    {"Q_TILE_SIZE": 32, "K_TILE_SIZE": 64},
-    {"Q_TILE_SIZE": 32, "K_TILE_SIZE": 128},
-    {"Q_TILE_SIZE": 64, "K_TILE_SIZE": 16},
-    {"Q_TILE_SIZE": 64, "K_TILE_SIZE": 32},
-    {"Q_TILE_SIZE": 64, "K_TILE_SIZE": 64},
-    {"Q_TILE_SIZE": 64, "K_TILE_SIZE": 128},
-    {"Q_TILE_SIZE": 128, "K_TILE_SIZE": 16},
-    {"Q_TILE_SIZE": 128, "K_TILE_SIZE": 32},
-    {"Q_TILE_SIZE": 128, "K_TILE_SIZE": 64},
-    {"Q_TILE_SIZE": 128, "K_TILE_SIZE": 128}
+    {
+      "Q_TILE_SIZE": 64,
+      "K_TILE_SIZE": 64,
+      "num_warps": 4,
+      "num_stages": 2
+    }
   ],
   "backward_dkdv": [
-    {"Q_TILE_SIZE": 16, "K_TILE_SIZE": 16},
-    {"Q_TILE_SIZE": 16, "K_TILE_SIZE": 32},
-    {"Q_TILE_SIZE": 16, "K_TILE_SIZE": 64},
-    {"Q_TILE_SIZE": 16, "K_TILE_SIZE": 128},
-    {"Q_TILE_SIZE": 32, "K_TILE_SIZE": 16},
-    {"Q_TILE_SIZE": 32, "K_TILE_SIZE": 32},
-    {"Q_TILE_SIZE": 32, "K_TILE_SIZE": 64},
-    {"Q_TILE_SIZE": 32, "K_TILE_SIZE": 128},
-    {"Q_TILE_SIZE": 64, "K_TILE_SIZE": 16},
-    {"Q_TILE_SIZE": 64, "K_TILE_SIZE": 32},
-    {"Q_TILE_SIZE": 64, "K_TILE_SIZE": 64},
-    {"Q_TILE_SIZE": 64, "K_TILE_SIZE": 128},
-    {"Q_TILE_SIZE": 128, "K_TILE_SIZE": 16},
-    {"Q_TILE_SIZE": 128, "K_TILE_SIZE": 32},
-    {"Q_TILE_SIZE": 128, "K_TILE_SIZE": 64},
-    {"Q_TILE_SIZE": 128, "K_TILE_SIZE": 128}
+    {
+      "Q_TILE_SIZE": 64,
+      "K_TILE_SIZE": 64,
+      "num_warps": 4,
+      "num_stages": 2
+    }
   ]
 }
