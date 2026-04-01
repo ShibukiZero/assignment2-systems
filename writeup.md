@@ -441,11 +441,23 @@ The dominant trend is that `NCCL + GPU` is consistently much faster than `Gloo +
 
 Setup:
 
-TODO
+We benchmarked the naive DDP training loop in a single-node `2`-GPU configuration using the `XL` language model, `NCCL`, context length `128`, global batch size `8`, and `fp32` precision. Each run used `5` warmup iterations followed by `20` measured iterations, and we aggregated timing statistics across both ranks. The archived summary is in `artifacts/experiments/ch2/2_2_naive_ddp/summary.md`, and the raw benchmark payload is in `artifacts/experiments/ch2/2_2_naive_ddp/timer_xl_ctx128_nccl_w2_gbs8_fp32.json`.
 
 Results:
 
-TODO
+| Metric | Mean |
+| --- | ---: |
+| Forward + backward | 313.364 ms |
+| Gradient communication | 40.526 ms |
+| Optimizer step | 91.821 ms |
+| Total training step | 445.714 ms |
+| Communication fraction | 9.091% |
+
+The naive DDP baseline spends about `40.5 ms` per step in explicit gradient synchronization, which corresponds to roughly `9.1%` of the total training-step time in this setting. Most of the runtime is still local computation: `forward + backward` accounts for about `70.3%` of the step, while `optimizer.step()` contributes about `20.6%`. The two ranks were also closely matched (`445.43 ms` vs `446.00 ms` mean step time), so the benchmark does not show evidence of a rank imbalance or a synchronization bug.
+
+The Nsight Systems trace is also consistent with this timing breakdown: in the measured step, the communication phase appears as a distinct post-backward region rather than overlapping with the backward pass.
+
+![Naive DDP Nsight Systems trace](artifacts/experiments/ch2/2_2_naive_ddp/naive%20ddp%20nsys.png)
 
 ---
 
