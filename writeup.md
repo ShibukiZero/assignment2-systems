@@ -408,7 +408,7 @@ Using the current default best-config JSON, our final handout-style leaderboard 
 
 **Answer:**
 
-We benchmarked single-node `all_reduce` with `5` warmup iterations and `20` measured iterations per configuration, aggregating per-iteration timings across ranks. We compared `Gloo + CPU` and `NCCL + GPU` on float32 tensors of size `1 MB`, `10 MB`, `100 MB`, and `1 GB`, while varying the number of worker processes over `2`, `4`, and `6`. The full archived summary is in `artifacts/experiments/ch2/2_1_1/summary.md`, and the raw benchmark payload is in `.agents/logs/distributed_communication_single_node.json`.
+We benchmarked single-node `all_reduce` with `5` warmup iterations and `20` measured iterations per configuration, aggregating per-iteration timings across ranks. We compared `Gloo + CPU` and `NCCL + GPU` on float32 tensors of size `1 MB`, `10 MB`, `100 MB`, and `1 GB`, while varying the number of worker processes over `2`, `4`, and `6`. The full archived summary is in `artifacts/experiments/ch2/2_1_1/summary.md`, and the raw benchmark payload is in `artifacts/experiments/ch2/2_1_1/results.json`.
 
 Gloo + CPU:
 

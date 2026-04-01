@@ -1,7 +1,7 @@
 # Distributed Communication on a Single Node
 
 Source:
-- Raw benchmark payload: `.agents/logs/distributed_communication_single_node.json`
+- Raw benchmark payload: `artifacts/experiments/ch2/2_1_1/results.json`
 
 Setup:
 - single-node multi-process `all_reduce`
