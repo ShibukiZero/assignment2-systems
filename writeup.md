@@ -408,13 +408,25 @@ Using the current default best-config JSON, our final handout-style leaderboard 
 
 **Answer:**
 
-Results:
+We benchmarked single-node `all_reduce` with `5` warmup iterations and `20` measured iterations per configuration, aggregating per-iteration timings across ranks. We compared `Gloo + CPU` and `NCCL + GPU` on float32 tensors of size `1 MB`, `10 MB`, `100 MB`, and `1 GB`, while varying the number of worker processes over `2`, `4`, and `6`. The full archived summary is in `artifacts/experiments/ch2/2_1_1/summary.md`, and the raw benchmark payload is in `.agents/logs/distributed_communication_single_node.json`.
 
-TODO
+Gloo + CPU:
 
-Commentary:
+| Processes | 1 MB (ms) | 10 MB (ms) | 100 MB (ms) | 1 GB (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| 2 | 0.442 | 3.942 | 73.296 | 909.977 |
+| 4 | 0.784 | 8.017 | 149.262 | 1272.314 |
+| 6 | 1.120 | 11.554 | 182.700 | 1626.451 |
 
-TODO
+NCCL + GPU:
+
+| Processes | 1 MB (ms) | 10 MB (ms) | 100 MB (ms) | 1 GB (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| 2 | 0.073 | 0.165 | 0.931 | 8.110 |
+| 4 | 0.196 | 0.280 | 1.280 | 10.972 |
+| 6 | 0.199 | 0.359 | 1.688 | 11.960 |
+
+The dominant trend is that `NCCL + GPU` is consistently much faster than `Gloo + CPU`, and the gap becomes especially large for larger messages. For example, at `1 GB` the mean latency is about `910 ms` vs `8.11 ms` for `2` processes and about `1626 ms` vs `11.96 ms` for `6` processes. In both backends, larger tensors lead to higher latency, and increasing the number of participating processes also tends to increase the runtime, which is consistent with communication cost growing as more data and more workers participate in the collective. Most configurations were also very consistent across ranks; the only noticeably noisy case was `NCCL`, `6` processes, `100 MB`, whose per-rank means remained tightly clustered around `1.69 ms`, suggesting a few slow outlier iterations rather than a systematic synchronization bug.
 
 ---
 
