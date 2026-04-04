@@ -472,11 +472,29 @@ The Nsight Systems trace is also consistent with this timing breakdown: in the m
 
 Results:
 
-TODO
+We reran both the individual-gradient baseline and the flattened-gradient variant with the same benchmark script and the same setup: `1` node, `2` GPUs, `XL` model size, context length `128`, global batch size `8`, `fp32`, `5` warmup iterations, and `20` measured iterations. The archived comparison summary is in `artifacts/experiments/ch2/2_3_1_flat_ddp/summary.md`, and the two raw benchmark payloads are in `artifacts/experiments/ch2/2_3_1_flat_ddp/individual_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json` and `artifacts/experiments/ch2/2_3_1_flat_ddp/flat_xl_ctx128_nccl_w2_gbs8_fp32.json`.
+
+| Metric | Individual all-reduce | Flattened all-reduce |
+| --- | ---: | ---: |
+| Forward + backward | 313.317 ms | 314.240 ms |
+| Gradient communication | 40.545 ms | 39.197 ms |
+| Optimizer step | 92.059 ms | 92.949 ms |
+| Total training step | 445.923 ms | 446.389 ms |
+| Communication fraction | 9.092% | 8.781% |
 
 Comparison:
 
-TODO
+Flattening all gradients into a single communication buffer reduced the measured communication time by about `1.35 ms` (`40.545 -> 39.197 ms`), which lowered the communication fraction from `9.09%` to `8.78%`. However, the end-to-end training-step time was nearly unchanged (`445.923 ms` vs `446.389 ms`), which suggests that this workload is still dominated by local computation rather than communication overhead; in addition, the flattened implementation still performs extra gradient packing and unpacking work, which likely offsets much of the communication-side gain.
+
+The Nsight Systems CUDA HW traces support this interpretation. In the flattened implementation, the NCCL all-reduce region itself is visibly shorter than in the per-parameter baseline, but it is followed by additional memory-copy activity associated with packing and unpacking the flattened gradient buffer. This helps explain why the communication phase becomes cheaper without producing a meaningful end-to-end step-time speedup.
+
+Naive per-parameter all-reduce CUDA HW trace:
+
+![Naive per-parameter all-reduce CUDA HW trace](artifacts/experiments/ch2/2_3_1_flat_ddp/naive%20profiling.png)
+
+Flattened all-reduce CUDA HW trace:
+
+![Flattened all-reduce CUDA HW trace](artifacts/experiments/ch2/2_3_1_flat_ddp/flat%20profiling.png)
 
 ---
 

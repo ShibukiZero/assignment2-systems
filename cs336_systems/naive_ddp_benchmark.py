@@ -16,7 +16,7 @@ import torch.nn.functional as F
 
 from cs336_basics.model import BasicsTransformerLM
 from cs336_basics.optimizer import AdamW
-from cs336_systems.ddp import NaiveDDP
+from cs336_systems.ddp import FlatGradDDP, NaiveDDP
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,7 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
 
 @dataclass(frozen=True)
 class BenchmarkConfig:
+    gradient_sync_mode: str
     model_size: str
     context_length: int
     global_batch_size: int
@@ -61,10 +62,19 @@ class BenchmarkConfig:
 def parse_args() -> BenchmarkConfig:
     parser = argparse.ArgumentParser(
         description=(
-            "Benchmark naive DDP training for Assignment 2 Chapter 2. "
+            "Benchmark Chapter 2 DDP training variants for Assignment 2. "
             "This script reports per-step runtime and communication share, "
             "and can optionally add NVTX ranges for Nsight Systems."
         )
+    )
+    parser.add_argument(
+        "--gradient-sync-mode",
+        choices=("individual", "flat"),
+        default="individual",
+        help=(
+            "individual reproduces the Section 2.2 baseline; "
+            "flat performs the Section 2.3.1 single flattened all-reduce."
+        ),
     )
     parser.add_argument("--model-size", choices=tuple(MODEL_PRESETS), default="xl")
     parser.add_argument("--context-length", type=int, default=128)
@@ -105,6 +115,7 @@ def parse_args() -> BenchmarkConfig:
     parser.add_argument("--output-path", type=str, default=None)
     args = parser.parse_args()
     return BenchmarkConfig(
+        gradient_sync_mode=args.gradient_sync_mode,
         model_size=args.model_size,
         context_length=args.context_length,
         global_batch_size=args.global_batch_size,
@@ -238,7 +249,7 @@ def compute_loss(
 
 
 def run_timed_step(
-    ddp_model: NaiveDDP,
+    ddp_model,
     optimizer: AdamW,
     input_ids: torch.Tensor,
     targets: torch.Tensor,
@@ -315,7 +326,7 @@ def gather_step_metrics(local_step_metrics: list[dict[str, float]], world_size: 
 
 
 def run_timer_benchmark(
-    ddp_model: NaiveDDP,
+    ddp_model,
     optimizer: AdamW,
     input_ids: torch.Tensor,
     targets: torch.Tensor,
@@ -357,6 +368,14 @@ def run_timer_benchmark(
     }
 
 
+def make_ddp_model(model: BasicsTransformerLM, config: BenchmarkConfig):
+    if config.gradient_sync_mode == "individual":
+        return NaiveDDP(model)
+    if config.gradient_sync_mode == "flat":
+        return FlatGradDDP(model)
+    raise ValueError(f"Unsupported gradient_sync_mode={config.gradient_sync_mode}")
+
+
 def setup_process_group(config: BenchmarkConfig, rank: int, world_size: int) -> torch.device:
     os.environ["MASTER_ADDR"] = config.master_addr
     os.environ["MASTER_PORT"] = str(config.master_port)
@@ -385,7 +404,7 @@ def worker_main(rank: int, world_size: int, config: BenchmarkConfig, result_queu
 
     try:
         model = make_model(config, device)
-        ddp_model = NaiveDDP(model)
+        ddp_model = make_ddp_model(model, config)
         optimizer = AdamW(
             ddp_model.parameters(),
             lr=config.learning_rate,
@@ -411,8 +430,11 @@ def resolve_output_path(output_path: str | None, payload: dict[str, object]) -> 
         return Path(output_path)
 
     config = payload["config"]
+    log_dir = ".agents/logs/2_2_naive_ddp"
+    if config["gradient_sync_mode"] == "flat":
+        log_dir = ".agents/logs/2_3_1_flat_ddp"
     return Path(
-        ".agents/logs/2_2_naive_ddp/"
+        f"{log_dir}/"
         f"timer_{config['model_size']}_ctx{config['context_length']}_"
         f"{config['backend']}_w{config['world_size']}_gbs{config['global_batch_size']}_"
         f"{config['precision']}.json"
@@ -432,8 +454,11 @@ def main() -> None:
     )
 
     result = result_queue.get()
+    benchmark_name = "naive_ddp_benchmarking"
+    if config.gradient_sync_mode == "flat":
+        benchmark_name = "minimal_ddp_flat_benchmarking"
     payload = {
-        "benchmark": "naive_ddp_benchmarking",
+        "benchmark": benchmark_name,
         "config": asdict(config),
         "world_size": config.world_size,
         "result": result,
