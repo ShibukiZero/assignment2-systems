@@ -16,7 +16,7 @@ import torch.nn.functional as F
 
 from cs336_basics.model import BasicsTransformerLM
 from cs336_basics.optimizer import AdamW
-from cs336_systems.ddp import FlatGradDDP, NaiveDDP
+from cs336_systems.ddp import FlatGradDDP, NaiveDDP, OverlapIndividualGradDDP
 
 
 @dataclass(frozen=True)
@@ -69,11 +69,12 @@ def parse_args() -> BenchmarkConfig:
     )
     parser.add_argument(
         "--gradient-sync-mode",
-        choices=("individual", "flat"),
+        choices=("individual", "flat", "overlap_individual"),
         default="individual",
         help=(
             "individual reproduces the Section 2.2 baseline; "
-            "flat performs the Section 2.3.1 single flattened all-reduce."
+            "flat performs the Section 2.3.1 single flattened all-reduce; "
+            "overlap_individual performs the Section 2.3.2 async per-parameter overlap variant."
         ),
     )
     parser.add_argument("--model-size", choices=tuple(MODEL_PRESETS), default="xl")
@@ -373,6 +374,8 @@ def make_ddp_model(model: BasicsTransformerLM, config: BenchmarkConfig):
         return NaiveDDP(model)
     if config.gradient_sync_mode == "flat":
         return FlatGradDDP(model)
+    if config.gradient_sync_mode == "overlap_individual":
+        return OverlapIndividualGradDDP(model)
     raise ValueError(f"Unsupported gradient_sync_mode={config.gradient_sync_mode}")
 
 
@@ -433,6 +436,8 @@ def resolve_output_path(output_path: str | None, payload: dict[str, object]) -> 
     log_dir = ".agents/logs/2_2_naive_ddp"
     if config["gradient_sync_mode"] == "flat":
         log_dir = ".agents/logs/2_3_1_flat_ddp"
+    elif config["gradient_sync_mode"] == "overlap_individual":
+        log_dir = ".agents/logs/2_3_2_overlap_individual"
     return Path(
         f"{log_dir}/"
         f"timer_{config['model_size']}_ctx{config['context_length']}_"
@@ -457,6 +462,8 @@ def main() -> None:
     benchmark_name = "naive_ddp_benchmarking"
     if config.gradient_sync_mode == "flat":
         benchmark_name = "minimal_ddp_flat_benchmarking"
+    elif config.gradient_sync_mode == "overlap_individual":
+        benchmark_name = "ddp_overlap_individual_parameters_benchmarking"
     payload = {
         "benchmark": benchmark_name,
         "config": asdict(config),

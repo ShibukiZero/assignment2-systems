@@ -509,11 +509,19 @@ Flattened all-reduce CUDA HW trace:
 
 Results:
 
-TODO
+We benchmarked the overlap-individual DDP implementation in the same setting as the previous experiments: `1` node, `2` GPUs, `XL` model size, context length `128`, global batch size `8`, `fp32`, `5` warmup iterations, and `20` measured iterations. The archived comparison summary is in `artifacts/experiments/ch2/2_3_2_overlap_individual/summary.md`, and the raw benchmark payloads are in `artifacts/experiments/ch2/2_3_2_overlap_individual/individual_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json`, `artifacts/experiments/ch2/2_3_2_overlap_individual/flat_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json`, and `artifacts/experiments/ch2/2_3_2_overlap_individual/overlap_individual_xl_ctx128_nccl_w2_gbs8_fp32.json`.
+
+| Metric | Naive individual | Flattened | Overlap individual |
+| --- | ---: | ---: | ---: |
+| Forward + backward | 313.317 ms | 314.240 ms | 322.575 ms |
+| Communication tail | 40.545 ms | 39.197 ms | 6.027 ms |
+| Optimizer step | 92.059 ms | 92.949 ms | 92.055 ms |
+| Total training step | 445.923 ms | 446.389 ms | 420.660 ms |
+| Communication fraction | 9.092% | 8.781% | 1.433% |
 
 Comparison:
 
-TODO
+Overlapping per-parameter gradient communication with backward computation reduced the total training-step time to `420.660 ms`, compared with `445.923 ms` for the naive baseline and `446.389 ms` for the flattened baseline. The post-backward communication tail dropped sharply to `6.027 ms` from about `40 ms` in the earlier baselines, which indicates that most communication was successfully hidden under the backward pass rather than paid entirely at the end of the step.
 
 ### (b)
 **Question:** Use Nsight to compare the initial DDP implementation with the overlapped implementation, and visually demonstrate whether communication overlaps with the backward pass.
@@ -522,13 +530,15 @@ TODO
 
 **Answer:**
 
+The Nsight traces show the expected qualitative difference between the two implementations. In the naive implementation, communication is concentrated in a separate region after the backward pass has finished. In the overlap implementation, communication activity appears during the backward pass itself, which is consistent with the much smaller post-backward communication tail measured in part (a).
+
 Initial DDP trace:
 
-![Initial DDP trace](TODO)
+![Initial DDP trace](artifacts/experiments/ch2/2_3_2_overlap_individual/naive%20profiling.png)
 
 Overlapped DDP trace:
 
-![Overlapped DDP trace](TODO)
+![Overlapped DDP trace](artifacts/experiments/ch2/2_3_2_overlap_individual/overlap%20profiling.png)
 
 ---
 

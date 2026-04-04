@@ -110,6 +110,52 @@ class FlatGradDDP(_BaseDDP):
             gradient.copy_(synchronized_gradient)
 
 
+class OverlapIndividualGradDDP(_BaseDDP):
+    """
+    Section 2.3.2 variant: asynchronously all-reduce each parameter gradient
+    as soon as that gradient has been accumulated in backward.
+
+    The key ideas are:
+    1. register a post-accumulate-grad hook on each unique trainable parameter,
+    2. launch dist.all_reduce(..., async_op=True) inside the hook,
+    3. wait on all pending handles right before optimizer.step().
+    """
+
+    def __init__(self, module: nn.Module):
+        super().__init__(module)
+        self._pending_gradient_syncs: list[tuple[nn.Parameter, dist.Work]] = []
+        self._hook_handles: list[torch.utils.hooks.RemovableHandle] = []
+        self._register_gradient_hooks()
+
+    def finish_gradient_synchronization(self) -> None:
+        if not dist.is_initialized() or self.world_size == 1:
+            return
+
+        for parameter, handle in self._pending_gradient_syncs:
+            handle.wait()
+            if parameter.grad is not None:
+                parameter.grad /= self.world_size
+        self._pending_gradient_syncs.clear()
+
+    def _register_gradient_hooks(self) -> None:
+        for parameter in self._iter_trainable_parameters():
+            self._hook_handles.append(parameter.register_post_accumulate_grad_hook(self._make_overlap_hook(parameter)))
+
+    def _make_overlap_hook(self, parameter: nn.Parameter):
+        def _hook(_unused_param: nn.Parameter) -> None:
+            if not dist.is_initialized() or self.world_size == 1:
+                return
+            if parameter.grad is None:
+                return
+
+            # Launch communication immediately when this gradient becomes ready.
+            # We wait only once, right before optimizer.step().
+            handle = dist.all_reduce(parameter.grad, op=dist.ReduceOp.SUM, async_op=True)
+            self._pending_gradient_syncs.append((parameter, handle))
+
+        return _hook
+
+
 def naive_ddp_train_step(
     *,
     ddp_model: _BaseDDP,
