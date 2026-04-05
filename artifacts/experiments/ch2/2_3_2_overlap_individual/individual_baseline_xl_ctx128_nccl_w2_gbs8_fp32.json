@@ -1,0 +1,71 @@
+{
+  "benchmark": "naive_ddp_benchmarking",
+  "config": {
+    "gradient_sync_mode": "individual",
+    "model_size": "xl",
+    "context_length": 128,
+    "global_batch_size": 8,
+    "vocab_size": 10000,
+    "rope_theta": 10000.0,
+    "precision": "fp32",
+    "backend": "nccl",
+    "device": "auto",
+    "world_size": 2,
+    "nvtx": false,
+    "warmup_steps": 5,
+    "measure_steps": 20,
+    "learning_rate": 0.001,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "master_addr": "127.0.0.1",
+    "master_port": 29500,
+    "output_path": "artifacts/experiments/ch2/2_3_2_overlap_individual/individual_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json"
+  },
+  "world_size": 2,
+  "result": {
+    "aggregate": {
+      "forward_backward_ms": {
+        "mean_ms": 313.31653289794923,
+        "stdev_ms": 0.4064389308629904,
+        "min_ms": 312.7221374511719,
+        "max_ms": 314.1688232421875
+      },
+      "communication_ms": {
+        "mean_ms": 40.54477510452271,
+        "stdev_ms": 0.8405343447693414,
+        "min_ms": 39.84291076660156,
+        "max_ms": 42.49625778198242
+      },
+      "optimizer_step_ms": {
+        "mean_ms": 92.05873050689698,
+        "stdev_ms": 0.16313006524500828,
+        "min_ms": 91.75494384765625,
+        "max_ms": 92.28902435302734
+      },
+      "total_step_ms": {
+        "mean_ms": 445.92293548583984,
+        "stdev_ms": 0.6392887592609915,
+        "min_ms": 444.8650207519531,
+        "max_ms": 447.4391784667969
+      },
+      "communication_fraction": {
+        "mean_ms": 9.092117090802795,
+        "stdev_ms": 0.17703835749977637,
+        "min_ms": 8.933921732790326,
+        "max_ms": 9.497661319601217
+      }
+    },
+    "per_rank_total_step_mean_ms": [
+      445.6031127929688,
+      446.2427581787109
+    ],
+    "per_rank_communication_mean_ms": [
+      39.92610683441162,
+      41.163443374633786
+    ],
+    "per_rank_communication_fraction_percent_mean": [
+      8.960014431060225,
+      9.224219750545364
+    ]
+  }
+}

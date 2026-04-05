@@ -1,0 +1,567 @@
+{
+  "benchmark": "distributed_communication_single_node",
+  "config": {
+    "backends": [
+      "gloo",
+      "nccl"
+    ],
+    "sizes_mb": [
+      1,
+      10,
+      100,
+      1024
+    ],
+    "process_counts": [
+      2,
+      4,
+      6
+    ],
+    "warmup_steps": 5,
+    "measure_steps": 20,
+    "master_addr": "127.0.0.1",
+    "master_port_base": 29500,
+    "output_path": "artifacts/experiments/ch2/2_1_1/results.json"
+  },
+  "results": [
+    {
+      "backend": "gloo",
+      "device_type": "cpu",
+      "world_size": 2,
+      "warmup_steps": 5,
+      "measure_steps": 20,
+      "sizes": [
+        {
+          "size_mb": 1,
+          "size_bytes": 1048576,
+          "numel_float32": 262144,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 0.4421103512868285,
+            "stdev_ms": 0.030042310970659104,
+            "min_ms": 0.37699611857533455,
+            "max_ms": 0.5256300792098045
+          },
+          "per_rank_mean_ms": [
+            0.4419090924784541,
+            0.4423116100952029
+          ],
+          "slowest_rank_mean_ms": 0.4423116100952029,
+          "fastest_rank_mean_ms": 0.4419090924784541
+        },
+        {
+          "size_mb": 10,
+          "size_bytes": 10485760,
+          "numel_float32": 2621440,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 3.9420689921826124,
+            "stdev_ms": 0.48879999238803157,
+            "min_ms": 3.4673353657126427,
+            "max_ms": 5.424560979008675
+          },
+          "per_rank_mean_ms": [
+            3.9427903247997165,
+            3.9413476595655084
+          ],
+          "slowest_rank_mean_ms": 3.9427903247997165,
+          "fastest_rank_mean_ms": 3.9413476595655084
+        },
+        {
+          "size_mb": 100,
+          "size_bytes": 104857600,
+          "numel_float32": 26214400,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 73.29621301032603,
+            "stdev_ms": 11.250434021367637,
+            "min_ms": 54.64862193912268,
+            "max_ms": 88.22080492973328
+          },
+          "per_rank_mean_ms": [
+            73.29693688079715,
+            73.29548913985491
+          ],
+          "slowest_rank_mean_ms": 73.29693688079715,
+          "fastest_rank_mean_ms": 73.29548913985491
+        },
+        {
+          "size_mb": 1024,
+          "size_bytes": 1073741824,
+          "numel_float32": 268435456,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 909.977284015622,
+            "stdev_ms": 161.41544873365945,
+            "min_ms": 668.0045588873327,
+            "max_ms": 1212.0597530156374
+          },
+          "per_rank_mean_ms": [
+            909.9441612837836,
+            910.0104067474604
+          ],
+          "slowest_rank_mean_ms": 910.0104067474604,
+          "fastest_rank_mean_ms": 909.9441612837836
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "backend": "gloo",
+      "device_type": "cpu",
+      "world_size": 4,
+      "warmup_steps": 5,
+      "measure_steps": 20,
+      "sizes": [
+        {
+          "size_mb": 1,
+          "size_bytes": 1048576,
+          "numel_float32": 262144,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 0.7840773614589125,
+            "stdev_ms": 0.11608057184681002,
+            "min_ms": 0.6220364011824131,
+            "max_ms": 1.1586067266762257
+          },
+          "per_rank_mean_ms": [
+            0.7844833424314857,
+            0.7855146192014217,
+            0.7827085210010409,
+            0.7836029632017016
+          ],
+          "slowest_rank_mean_ms": 0.7855146192014217,
+          "fastest_rank_mean_ms": 0.7827085210010409
+        },
+        {
+          "size_mb": 10,
+          "size_bytes": 10485760,
+          "numel_float32": 2621440,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 8.017387089785188,
+            "stdev_ms": 1.749800520562994,
+            "min_ms": 5.6434497237205505,
+            "max_ms": 11.374123860150576
+          },
+          "per_rank_mean_ms": [
+            8.01977221854031,
+            8.018424618057907,
+            8.005587011575699,
+            8.025764510966837
+          ],
+          "slowest_rank_mean_ms": 8.025764510966837,
+          "fastest_rank_mean_ms": 8.005587011575699
+        },
+        {
+          "size_mb": 100,
+          "size_bytes": 104857600,
+          "numel_float32": 26214400,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 149.2616802919656,
+            "stdev_ms": 36.25636052978434,
+            "min_ms": 123.89464303851128,
+            "max_ms": 249.13835292682052
+          },
+          "per_rank_mean_ms": [
+            149.24694416113198,
+            149.26573794800788,
+            149.2832302581519,
+            149.25080880057067
+          ],
+          "slowest_rank_mean_ms": 149.2832302581519,
+          "fastest_rank_mean_ms": 149.24694416113198
+        },
+        {
+          "size_mb": 1024,
+          "size_bytes": 1073741824,
+          "numel_float32": 268435456,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 1272.3138614499476,
+            "stdev_ms": 192.43812165621873,
+            "min_ms": 1014.2304361797869,
+            "max_ms": 1642.2055158764124
+          },
+          "per_rank_mean_ms": [
+            1272.311391378753,
+            1272.3203046014532,
+            1272.3354500252753,
+            1272.2882997943088
+          ],
+          "slowest_rank_mean_ms": 1272.3354500252753,
+          "fastest_rank_mean_ms": 1272.2882997943088
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "backend": "gloo",
+      "device_type": "cpu",
+      "world_size": 6,
+      "warmup_steps": 5,
+      "measure_steps": 20,
+      "sizes": [
+        {
+          "size_mb": 1,
+          "size_bytes": 1048576,
+          "numel_float32": 262144,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 1.1202269427788754,
+            "stdev_ms": 0.05359541315199537,
+            "min_ms": 1.0302658192813396,
+            "max_ms": 1.324336975812912
+          },
+          "per_rank_mean_ms": [
+            1.120812213048339,
+            1.1196113657206297,
+            1.1208779411390424,
+            1.1210649274289608,
+            1.1197722284123302,
+            1.1192229809239507
+          ],
+          "slowest_rank_mean_ms": 1.1210649274289608,
+          "fastest_rank_mean_ms": 1.1192229809239507
+        },
+        {
+          "size_mb": 10,
+          "size_bytes": 10485760,
+          "numel_float32": 2621440,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 11.5537015760007,
+            "stdev_ms": 2.157937062161984,
+            "min_ms": 6.684219930320978,
+            "max_ms": 14.464919921010733
+          },
+          "per_rank_mean_ms": [
+            11.56580806709826,
+            11.557299690321088,
+            11.53355734422803,
+            11.547378147952259,
+            11.553863366134465,
+            11.564302840270102
+          ],
+          "slowest_rank_mean_ms": 11.56580806709826,
+          "fastest_rank_mean_ms": 11.53355734422803
+        },
+        {
+          "size_mb": 100,
+          "size_bytes": 104857600,
+          "numel_float32": 26214400,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 182.69959394820035,
+            "stdev_ms": 58.220382109469575,
+            "min_ms": 139.6021181717515,
+            "max_ms": 333.1054439768195
+          },
+          "per_rank_mean_ms": [
+            182.67687535844743,
+            182.64755487907678,
+            182.68264490179718,
+            182.72648258134723,
+            182.74401193484664,
+            182.71999403368682
+          ],
+          "slowest_rank_mean_ms": 182.74401193484664,
+          "fastest_rank_mean_ms": 182.64755487907678
+        },
+        {
+          "size_mb": 1024,
+          "size_bytes": 1073741824,
+          "numel_float32": 268435456,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 1626.4513868566912,
+            "stdev_ms": 228.9222248988387,
+            "min_ms": 1264.6066970191896,
+            "max_ms": 2369.825000874698
+          },
+          "per_rank_mean_ms": [
+            1626.4596085296944,
+            1626.427110354416,
+            1626.435721339658,
+            1626.4564137673005,
+            1626.4638353371993,
+            1626.4656318118796
+          ],
+          "slowest_rank_mean_ms": 1626.4656318118796,
+          "fastest_rank_mean_ms": 1626.427110354416
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "backend": "nccl",
+      "device_type": "cuda",
+      "world_size": 2,
+      "warmup_steps": 5,
+      "measure_steps": 20,
+      "sizes": [
+        {
+          "size_mb": 1,
+          "size_bytes": 1048576,
+          "numel_float32": 262144,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 0.07312734378501773,
+            "stdev_ms": 0.008944713193392807,
+            "min_ms": 0.0673648901283741,
+            "max_ms": 0.12176390737295151
+          },
+          "per_rank_mean_ms": [
+            0.0750520033761859,
+            0.07120268419384956
+          ],
+          "slowest_rank_mean_ms": 0.0750520033761859,
+          "fastest_rank_mean_ms": 0.07120268419384956
+        },
+        {
+          "size_mb": 10,
+          "size_bytes": 10485760,
+          "numel_float32": 2621440,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 0.16456705052405596,
+            "stdev_ms": 0.002836700686282506,
+            "min_ms": 0.15982473269104958,
+            "max_ms": 0.17543230205774307
+          },
+          "per_rank_mean_ms": [
+            0.16549485735595226,
+            0.16363924369215965
+          ],
+          "slowest_rank_mean_ms": 0.16549485735595226,
+          "fastest_rank_mean_ms": 0.16363924369215965
+        },
+        {
+          "size_mb": 100,
+          "size_bytes": 104857600,
+          "numel_float32": 26214400,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 0.9308566921390593,
+            "stdev_ms": 0.0048642202146573395,
+            "min_ms": 0.9229639545083046,
+            "max_ms": 0.9446460753679276
+          },
+          "per_rank_mean_ms": [
+            0.9315532632172108,
+            0.9301601210609078
+          ],
+          "slowest_rank_mean_ms": 0.9315532632172108,
+          "fastest_rank_mean_ms": 0.9301601210609078
+        },
+        {
+          "size_mb": 1024,
+          "size_bytes": 1073741824,
+          "numel_float32": 268435456,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 8.110488369129598,
+            "stdev_ms": 0.08956226073294467,
+            "min_ms": 7.955193053930998,
+            "max_ms": 8.33233492448926
+          },
+          "per_rank_mean_ms": [
+            8.10732296667993,
+            8.113653771579266
+          ],
+          "slowest_rank_mean_ms": 8.113653771579266,
+          "fastest_rank_mean_ms": 8.10732296667993
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "backend": "nccl",
+      "device_type": "cuda",
+      "world_size": 4,
+      "warmup_steps": 5,
+      "measure_steps": 20,
+      "sizes": [
+        {
+          "size_mb": 1,
+          "size_bytes": 1048576,
+          "numel_float32": 262144,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 0.19574564066715539,
+            "stdev_ms": 0.02805238767812922,
+            "min_ms": 0.1663537696003914,
+            "max_ms": 0.3302367404103279
+          },
+          "per_rank_mean_ms": [
+            0.21033158991485834,
+            0.18911815714091063,
+            0.18391176126897335,
+            0.19962105434387922
+          ],
+          "slowest_rank_mean_ms": 0.21033158991485834,
+          "fastest_rank_mean_ms": 0.18391176126897335
+        },
+        {
+          "size_mb": 10,
+          "size_bytes": 10485760,
+          "numel_float32": 2621440,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 0.2803589275572449,
+            "stdev_ms": 0.018247064864441567,
+            "min_ms": 0.2610110677778721,
+            "max_ms": 0.3476310521364212
+          },
+          "per_rank_mean_ms": [
+            0.2928804140537977,
+            0.27266419492661953,
+            0.27247508987784386,
+            0.2834160113707185
+          ],
+          "slowest_rank_mean_ms": 0.2928804140537977,
+          "fastest_rank_mean_ms": 0.27247508987784386
+        },
+        {
+          "size_mb": 100,
+          "size_bytes": 104857600,
+          "numel_float32": 26214400,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 1.2802192533854395,
+            "stdev_ms": 0.013167220787484031,
+            "min_ms": 1.2552482075989246,
+            "max_ms": 1.3100039213895798
+          },
+          "per_rank_mean_ms": [
+            1.2908792588859797,
+            1.2756990268826485,
+            1.272817375138402,
+            1.281481352634728
+          ],
+          "slowest_rank_mean_ms": 1.2908792588859797,
+          "fastest_rank_mean_ms": 1.272817375138402
+        },
+        {
+          "size_mb": 1024,
+          "size_bytes": 1073741824,
+          "numel_float32": 268435456,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 10.971807490568608,
+            "stdev_ms": 0.5641781580496141,
+            "min_ms": 10.688867885619402,
+            "max_ms": 13.463262934237719
+          },
+          "per_rank_mean_ms": [
+            10.975441243499517,
+            10.973960347473621,
+            10.967164719477296,
+            10.970663651823997
+          ],
+          "slowest_rank_mean_ms": 10.975441243499517,
+          "fastest_rank_mean_ms": 10.967164719477296
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "backend": "nccl",
+      "device_type": "cuda",
+      "world_size": 6,
+      "warmup_steps": 5,
+      "measure_steps": 20,
+      "sizes": [
+        {
+          "size_mb": 1,
+          "size_bytes": 1048576,
+          "numel_float32": 262144,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 0.19876640290021896,
+            "stdev_ms": 0.047127649295343986,
+            "min_ms": 0.16865599900484085,
+            "max_ms": 0.419112853705883
+          },
+          "per_rank_mean_ms": [
+            0.19910079427063465,
+            0.19746215548366308,
+            0.19751051440835,
+            0.19696697127074003,
+            0.18789393361657858,
+            0.21366404835134745
+          ],
+          "slowest_rank_mean_ms": 0.21366404835134745,
+          "fastest_rank_mean_ms": 0.18789393361657858
+        },
+        {
+          "size_mb": 10,
+          "size_bytes": 10485760,
+          "numel_float32": 2621440,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 0.35859510535374284,
+            "stdev_ms": 0.048092603569751965,
+            "min_ms": 0.29450375586748123,
+            "max_ms": 0.532803125679493
+          },
+          "per_rank_mean_ms": [
+            0.36258248146623373,
+            0.34784653689712286,
+            0.3535883501172066,
+            0.3588899737223983,
+            0.3525316482409835,
+            0.3761316416785121
+          ],
+          "slowest_rank_mean_ms": 0.3761316416785121,
+          "fastest_rank_mean_ms": 0.34784653689712286
+        },
+        {
+          "size_mb": 100,
+          "size_bytes": 104857600,
+          "numel_float32": 26214400,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 1.688492891844362,
+            "stdev_ms": 1.2769080292026156,
+            "min_ms": 1.338588073849678,
+            "max_ms": 7.482620887458324
+          },
+          "per_rank_mean_ms": [
+            1.6988921677693725,
+            1.695023919455707,
+            1.6638532746583223,
+            1.6869832994416356,
+            1.6866008285433054,
+            1.6996038611978292
+          ],
+          "slowest_rank_mean_ms": 1.6996038611978292,
+          "fastest_rank_mean_ms": 1.6638532746583223
+        },
+        {
+          "size_mb": 1024,
+          "size_bytes": 1073741824,
+          "numel_float32": 268435456,
+          "measure_steps": 20,
+          "aggregate": {
+            "mean_ms": 11.96001604742681,
+            "stdev_ms": 0.4337996347560791,
+            "min_ms": 11.62344915792346,
+            "max_ms": 13.889469671994448
+          },
+          "per_rank_mean_ms": [
+            11.931867385283113,
+            11.959998263046145,
+            11.970112193375826,
+            11.969171720556915,
+            11.967340880073607,
+            11.961605842225254
+          ],
+          "slowest_rank_mean_ms": 11.970112193375826,
+          "fastest_rank_mean_ms": 11.931867385283113
+        }
+      ],
+      "status": "ok"
+    }
+  ]
+}

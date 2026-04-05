@@ -408,13 +408,25 @@ Using the current default best-config JSON, our final handout-style leaderboard 
 
 **Answer:**
 
-Results:
+We benchmarked single-node `all_reduce` with `5` warmup iterations and `20` measured iterations per configuration, aggregating per-iteration timings across ranks. We compared `Gloo + CPU` and `NCCL + GPU` on float32 tensors of size `1 MB`, `10 MB`, `100 MB`, and `1 GB`, while varying the number of worker processes over `2`, `4`, and `6`. The full archived summary is in `artifacts/experiments/ch2/2_1_1/summary.md`, and the raw benchmark payload is in `artifacts/experiments/ch2/2_1_1/results.json`.
 
-TODO
+Gloo + CPU:
 
-Commentary:
+| Processes | 1 MB (ms) | 10 MB (ms) | 100 MB (ms) | 1 GB (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| 2 | 0.442 | 3.942 | 73.296 | 909.977 |
+| 4 | 0.784 | 8.017 | 149.262 | 1272.314 |
+| 6 | 1.120 | 11.554 | 182.700 | 1626.451 |
 
-TODO
+NCCL + GPU:
+
+| Processes | 1 MB (ms) | 10 MB (ms) | 100 MB (ms) | 1 GB (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| 2 | 0.073 | 0.165 | 0.931 | 8.110 |
+| 4 | 0.196 | 0.280 | 1.280 | 10.972 |
+| 6 | 0.199 | 0.359 | 1.688 | 11.960 |
+
+The dominant trend is that `NCCL + GPU` is consistently much faster than `Gloo + CPU`, and the gap becomes especially large for larger messages. For example, at `1 GB` the mean latency is about `910 ms` vs `8.11 ms` for `2` processes and about `1626 ms` vs `11.96 ms` for `6` processes. In both backends, larger tensors lead to higher latency, and increasing the number of participating processes also tends to increase the runtime, which is consistent with communication cost growing as more data and more workers participate in the collective. Most configurations were also very consistent across ranks; the only noticeably noisy case was `NCCL`, `6` processes, `100 MB`, whose per-rank means remained tightly clustered around `1.69 ms`, suggesting a few slow outlier iterations rather than a systematic synchronization bug.
 
 ---
 
@@ -429,11 +441,23 @@ TODO
 
 Setup:
 
-TODO
+We benchmarked the naive DDP training loop in a single-node `2`-GPU configuration using the `XL` language model, `NCCL`, context length `128`, global batch size `8`, and `fp32` precision. Each run used `5` warmup iterations followed by `20` measured iterations, and we aggregated timing statistics across both ranks. The archived summary is in `artifacts/experiments/ch2/2_2_naive_ddp/summary.md`, and the raw benchmark payload is in `artifacts/experiments/ch2/2_2_naive_ddp/timer_xl_ctx128_nccl_w2_gbs8_fp32.json`.
 
 Results:
 
-TODO
+| Metric | Mean |
+| --- | ---: |
+| Forward + backward | 313.364 ms |
+| Gradient communication | 40.526 ms |
+| Optimizer step | 91.821 ms |
+| Total training step | 445.714 ms |
+| Communication fraction | 9.091% |
+
+The naive DDP baseline spends about `40.5 ms` per step in explicit gradient synchronization, which corresponds to roughly `9.1%` of the total training-step time in this setting. Most of the runtime is still local computation: `forward + backward` accounts for about `70.3%` of the step, while `optimizer.step()` contributes about `20.6%`. The two ranks were also closely matched (`445.43 ms` vs `446.00 ms` mean step time), so the benchmark does not show evidence of a rank imbalance or a synchronization bug.
+
+The Nsight Systems trace is also consistent with this timing breakdown: in the measured step, the communication phase appears as a distinct post-backward region rather than overlapping with the backward pass.
+
+![Naive DDP Nsight Systems trace](artifacts/experiments/ch2/2_2_naive_ddp/naive%20ddp%20nsys.png)
 
 ---
 
@@ -448,11 +472,29 @@ TODO
 
 Results:
 
-TODO
+We reran both the individual-gradient baseline and the flattened-gradient variant with the same benchmark script and the same setup: `1` node, `2` GPUs, `XL` model size, context length `128`, global batch size `8`, `fp32`, `5` warmup iterations, and `20` measured iterations. The archived comparison summary is in `artifacts/experiments/ch2/2_3_1_flat_ddp/summary.md`, and the two raw benchmark payloads are in `artifacts/experiments/ch2/2_3_1_flat_ddp/individual_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json` and `artifacts/experiments/ch2/2_3_1_flat_ddp/flat_xl_ctx128_nccl_w2_gbs8_fp32.json`.
+
+| Metric | Individual all-reduce | Flattened all-reduce |
+| --- | ---: | ---: |
+| Forward + backward | 313.317 ms | 314.240 ms |
+| Gradient communication | 40.545 ms | 39.197 ms |
+| Optimizer step | 92.059 ms | 92.949 ms |
+| Total training step | 445.923 ms | 446.389 ms |
+| Communication fraction | 9.092% | 8.781% |
 
 Comparison:
 
-TODO
+Flattening all gradients into a single communication buffer reduced the measured communication time by about `1.35 ms` (`40.545 -> 39.197 ms`), which lowered the communication fraction from `9.09%` to `8.78%`. However, the end-to-end training-step time was nearly unchanged (`445.923 ms` vs `446.389 ms`), which suggests that this workload is still dominated by local computation rather than communication overhead; in addition, the flattened implementation still performs extra gradient packing and unpacking work, which likely offsets much of the communication-side gain.
+
+The Nsight Systems CUDA HW traces support this interpretation. In the flattened implementation, the NCCL all-reduce region itself is visibly shorter than in the per-parameter baseline, but it is followed by additional memory-copy activity associated with packing and unpacking the flattened gradient buffer. This helps explain why the communication phase becomes cheaper without producing a meaningful end-to-end step-time speedup.
+
+Naive per-parameter all-reduce CUDA HW trace:
+
+![Naive per-parameter all-reduce CUDA HW trace](artifacts/experiments/ch2/2_3_1_flat_ddp/naive%20profiling.png)
+
+Flattened all-reduce CUDA HW trace:
+
+![Flattened all-reduce CUDA HW trace](artifacts/experiments/ch2/2_3_1_flat_ddp/flat%20profiling.png)
 
 ---
 
@@ -467,11 +509,19 @@ TODO
 
 Results:
 
-TODO
+We benchmarked the overlap-individual DDP implementation in the same setting as the previous experiments: `1` node, `2` GPUs, `XL` model size, context length `128`, global batch size `8`, `fp32`, `5` warmup iterations, and `20` measured iterations. The archived comparison summary is in `artifacts/experiments/ch2/2_3_2_overlap_individual/summary.md`, and the raw benchmark payloads are in `artifacts/experiments/ch2/2_3_2_overlap_individual/individual_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json`, `artifacts/experiments/ch2/2_3_2_overlap_individual/flat_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json`, and `artifacts/experiments/ch2/2_3_2_overlap_individual/overlap_individual_xl_ctx128_nccl_w2_gbs8_fp32.json`.
+
+| Metric | Naive individual | Flattened | Overlap individual |
+| --- | ---: | ---: | ---: |
+| Forward + backward | 313.317 ms | 314.240 ms | 322.575 ms |
+| Communication tail | 40.545 ms | 39.197 ms | 6.027 ms |
+| Optimizer step | 92.059 ms | 92.949 ms | 92.055 ms |
+| Total training step | 445.923 ms | 446.389 ms | 420.660 ms |
+| Communication fraction | 9.092% | 8.781% | 1.433% |
 
 Comparison:
 
-TODO
+Overlapping per-parameter gradient communication with backward computation reduced the total training-step time to `420.660 ms`, compared with `445.923 ms` for the naive baseline and `446.389 ms` for the flattened baseline. The post-backward communication tail dropped sharply to `6.027 ms` from about `40 ms` in the earlier baselines, which indicates that most communication was successfully hidden under the backward pass rather than paid entirely at the end of the step.
 
 ### (b)
 **Question:** Use Nsight to compare the initial DDP implementation with the overlapped implementation, and visually demonstrate whether communication overlaps with the backward pass.
@@ -480,13 +530,15 @@ TODO
 
 **Answer:**
 
+The Nsight traces show the expected qualitative difference between the two implementations. In the naive implementation, communication is concentrated in a separate region after the backward pass has finished. In the overlap implementation, communication activity appears during the backward pass itself, which is consistent with the much smaller post-backward communication tail measured in part (a).
+
 Initial DDP trace:
 
-![Initial DDP trace](TODO)
+![Initial DDP trace](artifacts/experiments/ch2/2_3_2_overlap_individual/naive%20profiling.png)
 
 Overlapped DDP trace:
 
-![Overlapped DDP trace](TODO)
+![Overlapped DDP trace](artifacts/experiments/ch2/2_3_2_overlap_individual/overlap%20profiling.png)
 
 ---
 
@@ -499,23 +551,65 @@ Overlapped DDP trace:
 
 **Answer:**
 
-| Bucket size (MB) | Time per training iteration |
-| --- | --- |
-| 1 | TODO |
-| 10 | TODO |
-| 100 | TODO |
-| 1000 | TODO |
+| Bucket size (MB) | Time per training iteration (ms) |
+| --- | ---: |
+| 1 | 423.133 |
+| 10 | 422.614 |
+| 100 | 433.551 |
+| 1000 | 429.040 |
 
 Commentary:
 
-TODO
+Bucketed DDP improved over both the naive per-parameter baseline (`445.923 ms`) and the single flattened baseline (`446.389 ms`), but it did not outperform the overlapped per-parameter implementation (`420.660 ms`). The best result came from a medium bucket size of `10 MB`, while both very small and very large buckets performed worse. This partly matches the expected tradeoff: larger buckets reduce the number of collective calls, but they also become ready later and therefore overlap less with the backward pass. In this simple implementation, the reduction in collective-call overhead is not enough to overcome the extra gradient packing and device-copy overhead, so bucketing gives a real improvement over the non-overlapped baselines but only limited benefit beyond overlapped per-parameter DDP.
+
+Profiling note:
+
+The profiler traces support the same interpretation. For small buckets (`1 MB` and `10 MB`), communication is broken into many shorter collectives that can start earlier during backward, while for larger buckets (`100 MB` and `1000 MB`) the communication regions are coarser and start later, which leaves a longer post-backward tail. At the same time, the bucketed implementation still performs extra packing and copying work, so reducing the number of collective calls does not fully translate into end-to-end speedup.
+
+1 MB trace:
+
+![1 MB bucket trace](artifacts/experiments/ch2/2_3_3_bucketed_ddp/1mb.png)
+
+10 MB trace:
+
+![10 MB bucket trace](artifacts/experiments/ch2/2_3_3_bucketed_ddp/10mb.png)
+
+100 MB trace:
+
+![100 MB bucket trace](artifacts/experiments/ch2/2_3_3_bucketed_ddp/100mb.png)
+
+1000 MB trace:
+
+![1000 MB bucket trace](artifacts/experiments/ch2/2_3_3_bucketed_ddp/1000mb.png)
 
 ### (b)
 **Question:** Assume that the time to compute gradients for a bucket equals the time to communicate that bucket. Write an equation for DDP communication overhead as a function of total model size `s`, all-reduce bandwidth `w`, per-call overhead `o`, and number of buckets `n_b`. Then write the equation for the optimal bucket size.
 
 **Deliverable:** An equation that models DDP overhead, and an equation for the optimal bucket size.
 
-**Answer:** TODO
+**Answer:** Let each bucket contain `s / n_b` bytes of gradients. Under the stated assumption, the time to compute one bucket of gradients equals the payload communication time for one bucket, so the payload communication time per bucket is `s / (n_b * w)`. In the ideal overlapped pipeline, the payload portion of most communication calls is hidden under the computation of later buckets, but two kinds of overhead remain visible after backward: the payload communication time of the final bucket, which has no later computation to hide behind, and the fixed launch overhead `o` for each of the `n_b` communication calls. Therefore a simple model for the post-backward DDP overhead is:
+
+```text
+T_overhead(n_b) = s / (n_b * w) + n_b * o
+```
+
+To minimize this expression, differentiate with respect to `n_b` and set the derivative to zero:
+
+```text
+dT_overhead / dn_b = -s / (w * n_b^2) + o = 0
+```
+
+which gives:
+
+```text
+n_b* = sqrt(s / (w * o))
+```
+
+Since the bucket size is `b = s / n_b`, the corresponding optimal bucket size is:
+
+```text
+b* = s / n_b* = sqrt(s * w * o)
+```
 
 ---
 
@@ -526,28 +620,28 @@ TODO
 
 **Deliverable:** Your calculations and a one-sentence response.
 
-**Answer:** TODO
+**Answer:** In the simplified FFN-only XXL model, each block has `2 * d_model * d_ff = 1,744,830,464` parameters, so the full model has `219,848,638,464` parameters. Storing the master weights and accumulated gradients in FP32 requires `819.0 GiB` each, while Adam optimizer state requires `1638.0 GiB`, for a total of `3276.0 GiB` of FP32 model state; this is a lower bound of about `43.97` H100 80GB GPUs even before counting saved activations. Since attention is omitted, the saved-for-backward activations are no longer quadratic in sequence length, but they still scale with token count: in this FFN-only model they contribute `num_blocks * B * T * (d_model + d_ff) * 2 = 17,547,264 * B * T bytes`, so the total training-memory requirement is `3,517,578,215,424 + 17,547,264 * B * T bytes`, corresponding to `ceil((3,517,578,215,424 + 17,547,264 * B * T) / (80 * 10^9))` H100 80GB GPUs. For three typical values using the assignment-wide default `B = 4`, the required H100 counts are about `44.08` (`T = 128`), `44.19` (`T = 256`), and `44.42` (`T = 512`). The full derivation is archived in [question_a_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_a_summary.md).
 
 ### (b)
 **Question:** Assume master weights, optimizer state, gradients, and half of the activations are sharded across `N_FSDP` devices. Write an expression for the memory per device. What value of `N_FSDP` is needed for the total memory cost to be less than one v5p TPU device (95 GB per device)?
 
 **Deliverable:** Your calculations and a one-sentence response.
 
-**Answer:** TODO
+**Answer:** Let `W`, `G`, `O`, and `A` denote the memory for master weights, accumulated gradients, optimizer states, and saved activations respectively. Since the problem states that `W`, `G`, `O`, and half of the activations are sharded across `N_FSDP` devices, the per-device memory is `M(N_FSDP) = (W + G + O + 0.5A) / N_FSDP + 0.5A`. Using part (a), this becomes `(3,517,578,215,424 + 0.5 * (17,547,264 * B * T)) / N_FSDP + 0.5 * (17,547,264 * B * T)` bytes per device. Requiring this to be below `95 * 10^9` bytes gives `N_FSDP > (3,517,578,215,424 + 0.5 * (17,547,264 * B * T)) / (95 * 10^9 - 0.5 * (17,547,264 * B * T))`, so the minimum valid choice is the ceiling of that expression. For three typical values using `B = 4`, the minimum values are `39` (`T = 128`), `41` (`T = 256`), and `46` (`T = 512`). The full derivation is archived in [question_b_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_b_summary.md).
 
 ### (c)
 **Question:** Consider only the forward pass. Using the provided TPU v5p bandwidth and FLOP rate, with `M_X = 2`, `M_Y = 1`, `X = 16`, and `Y = 4`, at what per-device batch size is the model compute bound? What is the overall batch size in this setting?
 
 **Deliverable:** Your calculations and a one-sentence response.
 
-**Answer:** TODO
+**Answer:** Following the mixed FSDP + TP forward-pass model from the Scaling Book, we compare `T_math = 4 * B * D * F / (N * C)` against `T_comms = max(T_FSDP, T_TP)`, where `T_FSDP = 4 * D * F / (Y * W_ici * M_X)` and `T_TP = 4 * B * D / (X * W_ici * M_Y)`. Writing `b = B / N` for the per-device token batch size and using `C = 4.6 * 10^14`, `W_ici = 2 * 9 * 10^10`, `Y = 4`, and `M_X = 2`, the FSDP-side compute-bound threshold is `b >= C / (Y * W_ici * M_X) = 2555.56 / (4 * 2) = 319.44` tokens per device, so the minimum integer per-device batch is `320` tokens. With `N = X * Y = 64`, the corresponding overall token batch threshold is `319.44 * 64 = 20,444.44`, so the minimum integer overall batch is `20,480` tokens. The TP-side condition `F >= (C / W_ici) * (Y / M_Y)` is also satisfied because `53,248 > 10,222.22`, so the FSDP communication term is the limiting factor. The full derivation is archived in [question_c_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_c_summary.md).
 
 ### (d)
 **Question:** In practice, we want the overall batch size to be as small as possible while staying compute efficient instead of communication bound. What tricks can we use to reduce the batch size while retaining high throughput?
 
 **Deliverable:** A one-paragraph response backed up with references and/or equations.
 
-**Answer:** TODO
+**Answer:** Part (c) already assumes an idealized overlap model, so the cleanest ways to reduce the batch size needed for high throughput are the ones that directly improve the communication terms rather than simply "adding more overlap." One option is to increase the effective communication bandwidth, i.e. to improve `M_X` and `M_Y` through a better topology / placement so that the collective terms shrink. A second option is to rebalance the hybrid parallelism by changing `X` and `Y`, so that neither the FSDP nor the TP communication term dominates the other. A third option is to reduce the communication volume itself, for example with lower-precision communication or more communication-efficient collectives, which shifts the compute/communication crossover to a smaller batch. Finally, gradient accumulation is a practical engineering workaround: it does change training dynamics by increasing the effective batch per optimizer step, but it lets us keep the instantaneous microbatch small enough to fit memory while amortizing synchronization overhead across more local work. A longer summary of these tradeoffs is archived in [question_d_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_d_summary.md).
 
 ---
 

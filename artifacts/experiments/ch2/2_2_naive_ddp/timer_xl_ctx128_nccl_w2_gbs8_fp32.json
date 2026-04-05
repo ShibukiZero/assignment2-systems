@@ -1,0 +1,75 @@
+{
+  "benchmark": "naive_ddp_benchmarking",
+  "config": {
+    "model_size": "xl",
+    "context_length": 128,
+    "global_batch_size": 8,
+    "vocab_size": 10000,
+    "rope_theta": 10000.0,
+    "precision": "fp32",
+    "backend": "nccl",
+    "device": "auto",
+    "world_size": 2,
+    "mode": "timer",
+    "warmup_steps": 5,
+    "measure_steps": 20,
+    "profile_steps": 3,
+    "learning_rate": 0.001,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "master_addr": "127.0.0.1",
+    "master_port": 29500,
+    "profile_dir": null,
+    "profile_record_shapes": false,
+    "profile_with_stack": false,
+    "output_path": "artifacts/experiments/ch2/2_2_naive_ddp/timer_xl_ctx128_nccl_w2_gbs8_fp32.json"
+  },
+  "world_size": 2,
+  "result": {
+    "mode": "timer",
+    "aggregate": {
+      "forward_backward_ms": {
+        "mean_ms": 313.3642044067383,
+        "stdev_ms": 1.6707199821522052,
+        "min_ms": 312.418212890625,
+        "max_ms": 323.45330810546875
+      },
+      "communication_ms": {
+        "mean_ms": 40.52602109909058,
+        "stdev_ms": 1.718614557377312,
+        "min_ms": 39.72937774658203,
+        "max_ms": 50.23497772216797
+      },
+      "optimizer_step_ms": {
+        "mean_ms": 91.82087783813476,
+        "stdev_ms": 0.15165881572639345,
+        "min_ms": 91.57286071777344,
+        "max_ms": 92.08409881591797
+      },
+      "total_step_ms": {
+        "mean_ms": 445.7140319824219,
+        "stdev_ms": 2.2767400896966534,
+        "min_ms": 444.3075866699219,
+        "max_ms": 455.2818298339844
+      },
+      "communication_fraction": {
+        "mean_ms": 9.091334229926817,
+        "stdev_ms": 0.34975754787899105,
+        "min_ms": 8.734585824339671,
+        "max_ms": 11.033820027582879
+      }
+    },
+    "per_rank_total_step_mean_ms": [
+      445.430192565918,
+      445.9978713989258
+    ],
+    "per_rank_communication_mean_ms": [
+      40.31078281402588,
+      40.74125938415527
+    ],
+    "per_rank_communication_fraction_percent_mean": [
+      9.047547417393014,
+      9.135121042460622
+    ]
+  }
+}
