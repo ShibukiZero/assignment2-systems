@@ -641,7 +641,7 @@ b* = s / n_b* = sqrt(s * w * o)
 
 **Deliverable:** A one-paragraph response backed up with references and/or equations.
 
-**Answer:** TODO
+**Answer:** Part (c) already assumes an idealized overlap model, so the cleanest ways to reduce the batch size needed for high throughput are the ones that directly improve the communication terms rather than simply "adding more overlap." One option is to increase the effective communication bandwidth, i.e. to improve `M_X` and `M_Y` through a better topology / placement so that the collective terms shrink. A second option is to rebalance the hybrid parallelism by changing `X` and `Y`, so that neither the FSDP nor the TP communication term dominates the other. A third option is to reduce the communication volume itself, for example with lower-precision communication or more communication-efficient collectives, which shifts the compute/communication crossover to a smaller batch. Finally, gradient accumulation is a practical engineering workaround: it does change training dynamics by increasing the effective batch per optimizer step, but it lets us keep the instantaneous microbatch small enough to fit memory while amortizing synchronization overhead across more local work. A longer summary of these tradeoffs is archived in [question_d_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_d_summary.md).
 
 ---
 
