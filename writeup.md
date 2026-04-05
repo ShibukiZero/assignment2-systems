@@ -551,16 +551,36 @@ Overlapped DDP trace:
 
 **Answer:**
 
-| Bucket size (MB) | Time per training iteration |
-| --- | --- |
-| 1 | TODO |
-| 10 | TODO |
-| 100 | TODO |
-| 1000 | TODO |
+| Bucket size (MB) | Time per training iteration (ms) |
+| --- | ---: |
+| 1 | 423.133 |
+| 10 | 422.614 |
+| 100 | 433.551 |
+| 1000 | 429.040 |
 
 Commentary:
 
-TODO
+Bucketed DDP improved over both the naive per-parameter baseline (`445.923 ms`) and the single flattened baseline (`446.389 ms`), but it did not outperform the overlapped per-parameter implementation (`420.660 ms`). The best result came from a medium bucket size of `10 MB`, while both very small and very large buckets performed worse. This partly matches the expected tradeoff: larger buckets reduce the number of collective calls, but they also become ready later and therefore overlap less with the backward pass. In this simple implementation, the reduction in collective-call overhead is not enough to overcome the extra gradient packing and device-copy overhead, so bucketing gives a real improvement over the non-overlapped baselines but only limited benefit beyond overlapped per-parameter DDP.
+
+Profiling note:
+
+The profiler traces support the same interpretation. For small buckets (`1 MB` and `10 MB`), communication is broken into many shorter collectives that can start earlier during backward, while for larger buckets (`100 MB` and `1000 MB`) the communication regions are coarser and start later, which leaves a longer post-backward tail. At the same time, the bucketed implementation still performs extra packing and copying work, so reducing the number of collective calls does not fully translate into end-to-end speedup.
+
+1 MB trace:
+
+![1 MB bucket trace](artifacts/experiments/ch2/2_3_3_bucketed_ddp/1mb.png)
+
+10 MB trace:
+
+![10 MB bucket trace](artifacts/experiments/ch2/2_3_3_bucketed_ddp/10mb.png)
+
+100 MB trace:
+
+![100 MB bucket trace](artifacts/experiments/ch2/2_3_3_bucketed_ddp/100mb.png)
+
+1000 MB trace:
+
+![1000 MB bucket trace](artifacts/experiments/ch2/2_3_3_bucketed_ddp/1000mb.png)
 
 ### (b)
 **Question:** Assume that the time to compute gradients for a bucket equals the time to communicate that bucket. Write an equation for DDP communication overhead as a function of total model size `s`, all-reduce bandwidth `w`, per-call overhead `o`, and number of buckets `n_b`. Then write the equation for the optimal bucket size.

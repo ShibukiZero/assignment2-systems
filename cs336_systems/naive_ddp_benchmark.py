@@ -13,10 +13,11 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn.functional as F
+import torch.profiler
 
 from cs336_basics.model import BasicsTransformerLM
 from cs336_basics.optimizer import AdamW
-from cs336_systems.ddp import FlatGradDDP, NaiveDDP, OverlapIndividualGradDDP
+from cs336_systems.ddp import BucketedGradDDP, FlatGradDDP, NaiveDDP, OverlapIndividualGradDDP
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,9 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
 
 @dataclass(frozen=True)
 class BenchmarkConfig:
+    mode: str
     gradient_sync_mode: str
+    bucket_size_mb: float | None
     model_size: str
     context_length: int
     global_batch_size: int
@@ -51,12 +54,14 @@ class BenchmarkConfig:
     nvtx: bool
     warmup_steps: int
     measure_steps: int
+    profile_steps: int
     learning_rate: float
     weight_decay: float
     seed: int
     master_addr: str
     master_port: int
     output_path: str | None
+    torch_profiler_dir: str | None
 
 
 def parse_args() -> BenchmarkConfig:
@@ -64,18 +69,27 @@ def parse_args() -> BenchmarkConfig:
         description=(
             "Benchmark Chapter 2 DDP training variants for Assignment 2. "
             "This script reports per-step runtime and communication share, "
-            "and can optionally add NVTX ranges for Nsight Systems."
+            "can export torch.profiler traces, and can optionally add NVTX "
+            "ranges for Nsight Systems."
         )
     )
+    parser.add_argument("--mode", choices=("timer", "torch_profiler"), default="timer")
     parser.add_argument(
         "--gradient-sync-mode",
-        choices=("individual", "flat", "overlap_individual"),
+        choices=("individual", "flat", "overlap_individual", "bucketed"),
         default="individual",
         help=(
             "individual reproduces the Section 2.2 baseline; "
             "flat performs the Section 2.3.1 single flattened all-reduce; "
-            "overlap_individual performs the Section 2.3.2 async per-parameter overlap variant."
+            "overlap_individual performs the Section 2.3.2 async per-parameter overlap variant; "
+            "bucketed performs the Section 2.3.3 async bucketed overlap variant."
         ),
+    )
+    parser.add_argument(
+        "--bucket-size-mb",
+        type=float,
+        default=None,
+        help="Bucket size in MB for --gradient-sync-mode bucketed.",
     )
     parser.add_argument("--model-size", choices=tuple(MODEL_PRESETS), default="xl")
     parser.add_argument("--context-length", type=int, default=128)
@@ -108,15 +122,24 @@ def parse_args() -> BenchmarkConfig:
     )
     parser.add_argument("--warmup-steps", type=int, default=5)
     parser.add_argument("--measure-steps", type=int, default=20)
+    parser.add_argument("--profile-steps", type=int, default=3)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--master-addr", type=str, default="127.0.0.1")
     parser.add_argument("--master-port", type=int, default=29500)
     parser.add_argument("--output-path", type=str, default=None)
+    parser.add_argument(
+        "--torch-profiler-dir",
+        type=str,
+        default=None,
+        help="Output directory for per-rank torch.profiler traces and tables.",
+    )
     args = parser.parse_args()
     return BenchmarkConfig(
+        mode=args.mode,
         gradient_sync_mode=args.gradient_sync_mode,
+        bucket_size_mb=args.bucket_size_mb,
         model_size=args.model_size,
         context_length=args.context_length,
         global_batch_size=args.global_batch_size,
@@ -129,12 +152,14 @@ def parse_args() -> BenchmarkConfig:
         nvtx=args.nvtx,
         warmup_steps=args.warmup_steps,
         measure_steps=args.measure_steps,
+        profile_steps=args.profile_steps,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         seed=args.seed,
         master_addr=args.master_addr,
         master_port=args.master_port,
         output_path=args.output_path,
+        torch_profiler_dir=args.torch_profiler_dir,
     )
 
 
@@ -178,6 +203,13 @@ def maybe_nvtx_range(label: str, enabled: bool, device: torch.device):
         yield
     finally:
         torch.cuda.nvtx.range_pop()
+
+
+@contextmanager
+def annotate_range(label: str, config: BenchmarkConfig, device: torch.device):
+    with torch.profiler.record_function(label):
+        with maybe_nvtx_range(label, config.nvtx, device):
+            yield
 
 
 def summarize_series(values: list[float]) -> dict[str, float]:
@@ -249,6 +281,29 @@ def compute_loss(
         return F.cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
 
 
+def execute_training_step(
+    ddp_model,
+    optimizer: AdamW,
+    input_ids: torch.Tensor,
+    targets: torch.Tensor,
+    config: BenchmarkConfig,
+    device: torch.device,
+) -> None:
+    if hasattr(ddp_model, "on_train_batch_start"):
+        ddp_model.on_train_batch_start()
+    optimizer.zero_grad(set_to_none=True)
+    precision_context = make_precision_context(config, device)
+
+    with annotate_range("forward_and_loss", config, device):
+        loss = compute_loss(ddp_model, input_ids, targets, precision_context)
+    with annotate_range("backward", config, device):
+        loss.backward()
+    with annotate_range("gradient_all_reduce", config, device):
+        ddp_model.finish_gradient_synchronization()
+    with annotate_range("optimizer_step", config, device):
+        optimizer.step()
+
+
 def run_timed_step(
     ddp_model,
     optimizer: AdamW,
@@ -257,9 +312,6 @@ def run_timed_step(
     config: BenchmarkConfig,
     device: torch.device,
 ) -> dict[str, float]:
-    optimizer.zero_grad(set_to_none=True)
-    precision_context = make_precision_context(config, device)
-
     if device.type == "cuda":
         maybe_synchronize(device)
         total_start = torch.cuda.Event(enable_timing=True)
@@ -269,18 +321,22 @@ def run_timed_step(
         optimizer_end = torch.cuda.Event(enable_timing=True)
 
         total_start.record()
-        with maybe_nvtx_range("forward_and_loss", config.nvtx, device):
+        if hasattr(ddp_model, "on_train_batch_start"):
+            ddp_model.on_train_batch_start()
+        optimizer.zero_grad(set_to_none=True)
+        precision_context = make_precision_context(config, device)
+        with annotate_range("forward_and_loss", config, device):
             loss = compute_loss(ddp_model, input_ids, targets, precision_context)
-        with maybe_nvtx_range("backward", config.nvtx, device):
+        with annotate_range("backward", config, device):
             loss.backward()
         forward_backward_end.record()
 
         communication_start.record()
-        with maybe_nvtx_range("gradient_all_reduce", config.nvtx, device):
+        with annotate_range("gradient_all_reduce", config, device):
             ddp_model.finish_gradient_synchronization()
         communication_end.record()
 
-        with maybe_nvtx_range("optimizer_step", config.nvtx, device):
+        with annotate_range("optimizer_step", config, device):
             optimizer.step()
         optimizer_end.record()
 
@@ -291,18 +347,22 @@ def run_timed_step(
         optimizer_step_ms = communication_end.elapsed_time(optimizer_end)
     else:
         total_start_time = time.perf_counter()
-        with maybe_nvtx_range("forward_and_loss", config.nvtx, device):
+        if hasattr(ddp_model, "on_train_batch_start"):
+            ddp_model.on_train_batch_start()
+        optimizer.zero_grad(set_to_none=True)
+        precision_context = make_precision_context(config, device)
+        with annotate_range("forward_and_loss", config, device):
             loss = compute_loss(ddp_model, input_ids, targets, precision_context)
-        with maybe_nvtx_range("backward", config.nvtx, device):
+        with annotate_range("backward", config, device):
             loss.backward()
         forward_backward_end_time = time.perf_counter()
 
         communication_start_time = time.perf_counter()
-        with maybe_nvtx_range("gradient_all_reduce", config.nvtx, device):
+        with annotate_range("gradient_all_reduce", config, device):
             ddp_model.finish_gradient_synchronization()
         communication_end_time = time.perf_counter()
 
-        with maybe_nvtx_range("optimizer_step", config.nvtx, device):
+        with annotate_range("optimizer_step", config, device):
             optimizer.step()
         optimizer_end_time = time.perf_counter()
 
@@ -369,6 +429,80 @@ def run_timer_benchmark(
     }
 
 
+def resolve_torch_profiler_dir(config: BenchmarkConfig) -> Path:
+    if config.torch_profiler_dir is not None:
+        return Path(config.torch_profiler_dir)
+
+    log_dir = ".agents/logs/2_2_naive_ddp"
+    if config.gradient_sync_mode == "flat":
+        log_dir = ".agents/logs/2_3_1_flat_ddp"
+    elif config.gradient_sync_mode == "overlap_individual":
+        log_dir = ".agents/logs/2_3_2_overlap_individual"
+    elif config.gradient_sync_mode == "bucketed":
+        log_dir = ".agents/logs/2_3_3_bucketed_ddp"
+
+    dirname = (
+        f"torch_profiler_{config.model_size}_ctx{config.context_length}_"
+        f"{config.backend}_w{config.world_size}_gbs{config.global_batch_size}_"
+        f"{config.precision}"
+    )
+    if config.gradient_sync_mode == "bucketed" and config.bucket_size_mb is not None:
+        bucket_size_label = str(config.bucket_size_mb).replace(".", "p")
+        dirname += f"_bucket{bucket_size_label}mb"
+    return Path(f"{log_dir}/{dirname}")
+
+
+def run_torch_profiler_benchmark(
+    ddp_model,
+    optimizer: AdamW,
+    input_ids: torch.Tensor,
+    targets: torch.Tensor,
+    config: BenchmarkConfig,
+    device: torch.device,
+) -> dict[str, object]:
+    for step_idx in range(config.warmup_steps):
+        with annotate_range(f"warmup_{step_idx}", config, device):
+            execute_training_step(ddp_model, optimizer, input_ids, targets, config, device)
+
+    profiler_dir = resolve_torch_profiler_dir(config)
+    profiler_dir.mkdir(parents=True, exist_ok=True)
+    rank = dist.get_rank()
+    activities = [torch.profiler.ProfilerActivity.CPU]
+    if device.type == "cuda":
+        activities.append(torch.profiler.ProfilerActivity.CUDA)
+
+    with torch.profiler.profile(
+        activities=activities,
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=False,
+    ) as profiler:
+        for step_idx in range(config.profile_steps):
+            with annotate_range(f"profile_{step_idx}", config, device):
+                execute_training_step(ddp_model, optimizer, input_ids, targets, config, device)
+            profiler.step()
+
+    trace_path = profiler_dir / f"rank{rank}_trace.json"
+    table_path = profiler_dir / f"rank{rank}_table.txt"
+    profiler.export_chrome_trace(str(trace_path))
+    table_path.write_text(
+        profiler.key_averages().table(sort_by="self_cuda_time_total" if device.type == "cuda" else "self_cpu_time_total"),
+        encoding="utf-8",
+    )
+
+    if rank != 0:
+        return {}
+
+    return {
+        "profiler_dir": str(profiler_dir),
+        "profile_steps": config.profile_steps,
+        "artifacts": {
+            "rank0_trace": str(profiler_dir / "rank0_trace.json"),
+            "rank0_table": str(profiler_dir / "rank0_table.txt"),
+        },
+    }
+
+
 def make_ddp_model(model: BasicsTransformerLM, config: BenchmarkConfig):
     if config.gradient_sync_mode == "individual":
         return NaiveDDP(model)
@@ -376,6 +510,10 @@ def make_ddp_model(model: BasicsTransformerLM, config: BenchmarkConfig):
         return FlatGradDDP(model)
     if config.gradient_sync_mode == "overlap_individual":
         return OverlapIndividualGradDDP(model)
+    if config.gradient_sync_mode == "bucketed":
+        if config.bucket_size_mb is None:
+            raise ValueError("--bucket-size-mb is required for --gradient-sync-mode bucketed.")
+        return BucketedGradDDP(model, bucket_size_mb=config.bucket_size_mb)
     raise ValueError(f"Unsupported gradient_sync_mode={config.gradient_sync_mode}")
 
 
@@ -414,7 +552,10 @@ def worker_main(rank: int, world_size: int, config: BenchmarkConfig, result_queu
             weight_decay=config.weight_decay,
         )
         input_ids, targets = make_local_batch(config, device, world_size, rank)
-        result = run_timer_benchmark(ddp_model, optimizer, input_ids, targets, config, device)
+        if config.mode == "timer":
+            result = run_timer_benchmark(ddp_model, optimizer, input_ids, targets, config, device)
+        else:
+            result = run_torch_profiler_benchmark(ddp_model, optimizer, input_ids, targets, config, device)
 
         if rank == 0:
             result_queue.put(result)
@@ -438,12 +579,20 @@ def resolve_output_path(output_path: str | None, payload: dict[str, object]) -> 
         log_dir = ".agents/logs/2_3_1_flat_ddp"
     elif config["gradient_sync_mode"] == "overlap_individual":
         log_dir = ".agents/logs/2_3_2_overlap_individual"
-    return Path(
-        f"{log_dir}/"
-        f"timer_{config['model_size']}_ctx{config['context_length']}_"
+    elif config["gradient_sync_mode"] == "bucketed":
+        log_dir = ".agents/logs/2_3_3_bucketed_ddp"
+
+    filename = (
+        f"{config['mode']}_{config['model_size']}_ctx{config['context_length']}_"
         f"{config['backend']}_w{config['world_size']}_gbs{config['global_batch_size']}_"
-        f"{config['precision']}.json"
+        f"{config['precision']}"
     )
+    if config["gradient_sync_mode"] == "bucketed":
+        bucket_size_mb = config["bucket_size_mb"]
+        bucket_size_label = str(bucket_size_mb).replace(".", "p")
+        filename += f"_bucket{bucket_size_label}mb"
+    filename += ".json"
+    return Path(f"{log_dir}/{filename}")
 
 
 def main() -> None:
@@ -464,6 +613,8 @@ def main() -> None:
         benchmark_name = "minimal_ddp_flat_benchmarking"
     elif config.gradient_sync_mode == "overlap_individual":
         benchmark_name = "ddp_overlap_individual_parameters_benchmarking"
+    elif config.gradient_sync_mode == "bucketed":
+        benchmark_name = "ddp_bucketed_benchmarking"
     payload = {
         "benchmark": benchmark_name,
         "config": asdict(config),
