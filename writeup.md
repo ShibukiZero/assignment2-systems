@@ -620,7 +620,7 @@ b* = s / n_b* = sqrt(s * w * o)
 
 **Deliverable:** Your calculations and a one-sentence response.
 
-**Answer:** TODO
+**Answer:** In the simplified FFN-only XXL model, each block has `2 * d_model * d_ff = 1,744,830,464` parameters, so the full model has `219,848,638,464` parameters. Storing the master weights and accumulated gradients in FP32 requires `819.0 GiB` each, while Adam optimizer state requires `1638.0 GiB`, for a total of `3276.0 GiB` of FP32 model state, which is about `43.97` H100 80GB GPUs worth of memory. Since attention is omitted, the saved-for-backward activations are no longer quadratic in sequence length, but they still scale with token count: for BF16 activations, the simplified FFN-only model saves `num_blocks * B * T * (d_model + d_ff) * 2 = 17,547,264 * B * T bytes`. The full derivation is archived in [question_a_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_a_summary.md).
 
 ### (b)
 **Question:** Assume master weights, optimizer state, gradients, and half of the activations are sharded across `N_FSDP` devices. Write an expression for the memory per device. What value of `N_FSDP` is needed for the total memory cost to be less than one v5p TPU device (95 GB per device)?
