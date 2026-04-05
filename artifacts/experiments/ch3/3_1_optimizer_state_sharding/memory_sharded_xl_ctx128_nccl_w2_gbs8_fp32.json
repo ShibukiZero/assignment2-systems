@@ -1,0 +1,112 @@
+{
+  "benchmark": "optimizer_state_sharding_accounting_a",
+  "config": {
+    "mode": "memory",
+    "optimizer_mode": "sharded",
+    "model_size": "xl",
+    "context_length": 128,
+    "global_batch_size": 8,
+    "vocab_size": 10000,
+    "rope_theta": 10000.0,
+    "precision": "fp32",
+    "backend": "nccl",
+    "world_size": 2,
+    "device": "auto",
+    "warmup_steps": 5,
+    "measure_steps": 20,
+    "learning_rate": 0.001,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "master_addr": "127.0.0.1",
+    "master_port": 29510,
+    "output_path": ".agents/logs/3_1_optimizer_state_sharding/memory_sharded_xl_ctx128_nccl_w2_gbs8_fp32.json"
+  },
+  "per_rank": [
+    {
+      "checkpoints": [
+        {
+          "label": "after_model_initialization",
+          "current_allocated_bytes": 8183773696,
+          "current_reserved_bytes": 8185184256,
+          "max_allocated_bytes": 8183773696,
+          "max_reserved_bytes": 8185184256,
+          "active_peak_bytes": 8183773696,
+          "requested_peak_bytes": 7992981760,
+          "parameter_tensor_bytes": 7992940800,
+          "gradient_tensor_bytes": 0,
+          "optimizer_state_tensor_bytes": 0,
+          "residual_current_allocated_bytes": 190832896
+        },
+        {
+          "label": "before_optimizer_step",
+          "current_allocated_bytes": 16388331008,
+          "current_reserved_bytes": 20428357632,
+          "max_allocated_bytes": 16453343232,
+          "max_reserved_bytes": 20428357632,
+          "active_peak_bytes": 16453343232,
+          "requested_peak_bytes": 16117031432,
+          "parameter_tensor_bytes": 7992940800,
+          "gradient_tensor_bytes": 7992940800,
+          "optimizer_state_tensor_bytes": 0,
+          "residual_current_allocated_bytes": 402449408
+        },
+        {
+          "label": "after_optimizer_step",
+          "current_allocated_bytes": 24685860352,
+          "current_reserved_bytes": 27313307648,
+          "max_allocated_bytes": 25010918912,
+          "max_reserved_bytes": 27313307648,
+          "active_peak_bytes": 25010918912,
+          "requested_peak_bytes": 24493965828,
+          "parameter_tensor_bytes": 7992940800,
+          "gradient_tensor_bytes": 7992940800,
+          "optimizer_state_tensor_bytes": 8120934400,
+          "residual_current_allocated_bytes": 579044352
+        }
+      ]
+    },
+    {
+      "checkpoints": [
+        {
+          "label": "after_model_initialization",
+          "current_allocated_bytes": 8183773696,
+          "current_reserved_bytes": 8185184256,
+          "max_allocated_bytes": 8183773696,
+          "max_reserved_bytes": 8185184256,
+          "active_peak_bytes": 8183773696,
+          "requested_peak_bytes": 7992981760,
+          "parameter_tensor_bytes": 7992940800,
+          "gradient_tensor_bytes": 0,
+          "optimizer_state_tensor_bytes": 0,
+          "residual_current_allocated_bytes": 190832896
+        },
+        {
+          "label": "before_optimizer_step",
+          "current_allocated_bytes": 16388331008,
+          "current_reserved_bytes": 20428357632,
+          "max_allocated_bytes": 16453343232,
+          "max_reserved_bytes": 20428357632,
+          "active_peak_bytes": 16453343232,
+          "requested_peak_bytes": 16117031432,
+          "parameter_tensor_bytes": 7992940800,
+          "gradient_tensor_bytes": 7992940800,
+          "optimizer_state_tensor_bytes": 0,
+          "residual_current_allocated_bytes": 402449408
+        },
+        {
+          "label": "after_optimizer_step",
+          "current_allocated_bytes": 24429758976,
+          "current_reserved_bytes": 26635927552,
+          "max_allocated_bytes": 24639447552,
+          "max_reserved_bytes": 26635927552,
+          "active_peak_bytes": 24639447552,
+          "requested_peak_bytes": 24122753028,
+          "parameter_tensor_bytes": 7992940800,
+          "gradient_tensor_bytes": 7992940800,
+          "optimizer_state_tensor_bytes": 7864947200,
+          "residual_current_allocated_bytes": 578930176
+        }
+      ]
+    }
+  ]
+}
