@@ -1,0 +1,85 @@
+{
+  "config": {
+    "model_size": "xl",
+    "vocab_size": 10000,
+    "world_size": 2,
+    "output_path": ".agents/logs/3_1_optimizer_state_sharding/formula_xl_w2.json"
+  },
+  "parameter_count_breakdown": {
+    "embedding": 16000000,
+    "attention_per_layer": 10240000,
+    "ffn_per_layer": 30720000,
+    "norms_per_layer": 3200,
+    "final_norm": 1600,
+    "lm_head": 16000000,
+    "total": 1998235200
+  },
+  "formula_summary": {
+    "parameter_bytes_formula": "4 * P",
+    "gradient_bytes_formula": "4 * P",
+    "optimizer_state_full_bytes_formula": "8 * P",
+    "optimizer_state_sharded_idealized_bytes_formula": "8 * P / N",
+    "full_after_init_formula": "4 * P",
+    "full_before_step_formula": "8 * P",
+    "full_after_step_formula": "16 * P",
+    "sharded_after_init_formula": "4 * P",
+    "sharded_before_step_formula": "8 * P",
+    "sharded_after_step_idealized_formula": "(8 + 8 / N) * P"
+  },
+  "numeric_summary": {
+    "parameter_bytes": 7992940800,
+    "parameter_gib": 7.4440062046051025,
+    "gradient_bytes": 7992940800,
+    "gradient_gib": 7.4440062046051025,
+    "optimizer_state_full_bytes": 15985881600,
+    "optimizer_state_full_gib": 14.888012409210205,
+    "optimizer_state_sharded_idealized_bytes": 7992940800,
+    "optimizer_state_sharded_idealized_gib": 7.4440062046051025
+  },
+  "checkpoints": {
+    "full": {
+      "after_model_initialization_bytes": 7992940800,
+      "after_model_initialization_gib": 7.4440062046051025,
+      "before_optimizer_step_bytes": 15985881600,
+      "before_optimizer_step_gib": 14.888012409210205,
+      "after_optimizer_step_bytes": 31971763200,
+      "after_optimizer_step_gib": 29.77602481842041
+    },
+    "sharded_idealized": {
+      "after_model_initialization_bytes": 7992940800,
+      "after_model_initialization_gib": 7.4440062046051025,
+      "before_optimizer_step_bytes": 15985881600,
+      "before_optimizer_step_gib": 14.888012409210205,
+      "after_optimizer_step_bytes": 23978822400,
+      "after_optimizer_step_gib": 22.332018613815308
+    },
+    "sharded_implementation_per_rank": [
+      {
+        "rank": 0,
+        "after_model_initialization_bytes": 7992940800,
+        "after_model_initialization_gib": 7.4440062046051025,
+        "before_optimizer_step_bytes": 15985881600,
+        "before_optimizer_step_gib": 14.888012409210205,
+        "after_optimizer_step_bytes": 24106816000,
+        "after_optimizer_step_gib": 22.45122194290161,
+        "owned_parameter_bytes": 4060467200,
+        "owned_parameter_gib": 3.781604766845703,
+        "owned_optimizer_state_bytes": 8120934400,
+        "owned_optimizer_state_gib": 7.563209533691406
+      },
+      {
+        "rank": 1,
+        "after_model_initialization_bytes": 7992940800,
+        "after_model_initialization_gib": 7.4440062046051025,
+        "before_optimizer_step_bytes": 15985881600,
+        "before_optimizer_step_gib": 14.888012409210205,
+        "after_optimizer_step_bytes": 23850828800,
+        "after_optimizer_step_gib": 22.212815284729004,
+        "owned_parameter_bytes": 3932473600,
+        "owned_parameter_gib": 3.6624014377593994,
+        "owned_optimizer_state_bytes": 7864947200,
+        "owned_optimizer_state_gib": 7.324802875518799
+      }
+    ]
+  }
+}

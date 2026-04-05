@@ -26,6 +26,17 @@ def test_sharded_optimizer(model_class):
     )
 
 
+@pytest.mark.parametrize("model_class", [ToyModel, ToyModelWithTiedWeights])
+def test_sharded_optimizer_state_dict_round_trip(model_class):
+    world_size = 2
+    mp.spawn(
+        _test_sharded_optimizer_state_dict_round_trip,
+        args=(world_size, model_class),
+        nprocs=world_size,
+        join=True,
+    )
+
+
 def _test_sharded_optimizer(rank: int, world_size: int, model_class: Type[torch.nn.Module]):
     # Use gloo backend for CPU
     device = _setup_process_group(rank=rank, world_size=world_size, backend="gloo")
@@ -82,4 +93,63 @@ def _test_sharded_optimizer(rank: int, world_size: int, model_class: Type[torch.
             non_sharded_parameters.detach().cpu().numpy(),
             sharded_parameters.detach().cpu().numpy(),
         )
+    _cleanup_process_group()
+
+
+def _take_optimizer_step(
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    input_: torch.Tensor,
+    labels: torch.Tensor,
+) -> None:
+    optimizer.zero_grad()
+    logits = model(input_)
+    loss = ((labels - logits) ** 2).sum()
+    loss.backward()
+    optimizer.step()
+
+
+def _test_sharded_optimizer_state_dict_round_trip(rank: int, world_size: int, model_class: Type[torch.nn.Module]):
+    device = _setup_process_group(rank=rank, world_size=world_size, backend="gloo")
+    torch.manual_seed(42)
+    optimizer_cls = torch.optim.AdamW
+
+    model = model_class().to(device)
+    optimizer = get_sharded_optimizer(
+        model.parameters(),
+        optimizer_cls,
+        lr=0.1,
+        weight_decay=0.1,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+    )
+
+    for _ in range(3):
+        input_ = torch.rand((32, 10)).to(device)
+        labels = torch.rand((32, 5)).to(device)
+        _take_optimizer_step(model, optimizer, input_, labels)
+
+    resumed_model = deepcopy(model)
+    resumed_optimizer = get_sharded_optimizer(
+        resumed_model.parameters(),
+        optimizer_cls,
+        lr=0.1,
+        weight_decay=0.1,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+    )
+    resumed_optimizer.load_state_dict(deepcopy(optimizer.state_dict()))
+
+    next_input = torch.rand((32, 10)).to(device)
+    next_labels = torch.rand((32, 5)).to(device)
+
+    _take_optimizer_step(model, optimizer, deepcopy(next_input), deepcopy(next_labels))
+    _take_optimizer_step(resumed_model, resumed_optimizer, deepcopy(next_input), deepcopy(next_labels))
+
+    for original_parameter, resumed_parameter in zip(model.parameters(), resumed_model.parameters()):
+        numpy.testing.assert_allclose(
+            original_parameter.detach().cpu().numpy(),
+            resumed_parameter.detach().cpu().numpy(),
+        )
+
     _cleanup_process_group()

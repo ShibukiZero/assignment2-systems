@@ -652,18 +652,18 @@ b* = s / n_b* = sqrt(s * w * o)
 
 **Deliverable:** A 2-3 sentence response with peak memory usage results and a breakdown of the memory division across model and optimizer components.
 
-**Answer:** TODO
+**Answer:** On the standard 1-node, 2-GPU, XL setup, both the full and sharded optimizers peak at about `7.62 GiB` per GPU after model initialization and about `15.26 GiB` per GPU immediately before `optimizer.step()`, which matches the theoretical `4P` and `8P` scaling for `P = 1,998,235,200` FP32 parameters. After the first optimizer step, the full optimizer reaches about `30.49 GiB` per GPU, while the sharded optimizer reaches about `22.75 GiB` on rank 1 and `22.99 GiB` on rank 0, close to the theoretical `16P = 29.78 GiB` and `(8 + 8 / N)P = 22.33 GiB` expectations for `N = 2`. The breakdown is consistent with the implementation: parameters contribute about `7.44 GiB`, gradients another `7.44 GiB`, and Adam state drops from about `14.89 GiB` in the full optimizer to about `7.33-7.56 GiB` per rank in the sharded version, with the remaining gap explained by activations, temporary buffers, and allocator overhead.
 
 ### (b)
 **Question:** How does optimizer state sharding affect training speed? Measure the time per iteration with and without optimizer state sharding in the standard configuration.
 
 **Deliverable:** A 2-3 sentence response with your timings.
 
-**Answer:** TODO
+**Answer:** Optimizer state sharding leaves the forward-plus-backward portion essentially unchanged in this setup (`355.36 ms` without sharding versus `356.01 ms` with sharding), but it reduces optimizer-step time from `92.31 ms` to `79.14 ms`. As a result, the mean iteration time drops from `447.67 ms` to `435.15 ms`, which is a modest `1.03x` speedup (about `2.8%`). The most likely reason is that each rank now updates and maintains only about half of the Adam state, so the local optimizer step becomes cheaper and the extra post-step parameter broadcasts do not outweigh that savings at `world_size = 2`.
 
 ### (c)
 **Question:** How does this optimizer-state-sharding approach differ from ZeRO stage 1 as described in Rajbhandari et al. (2020), especially with respect to memory and communication volume?
 
 **Deliverable:** A 2-3 sentence summary of the differences.
 
-**Answer:** TODO
+**Answer:** Our implementation matches the core idea of ZeRO stage 1 (`P_os`): optimizer states are partitioned across data-parallel ranks, while parameters and gradients remain replicated, so each rank stores only about `1 / N` of the optimizer state. The main difference is that ours is a simplified teaching implementation: it keeps full gradients resident until `step()` and then explicitly broadcasts the updated parameter shards back to all ranks, whereas ZeRO stage 1 is described as part of a broader partition-aware communication schedule designed to keep communication volume close to standard data parallel training. In addition, Rajbhandari et al. analyze mixed-precision Adam, where the optimizer state also includes FP32 master parameters, while our experiments use the course FP32 AdamW implementation, so the exact memory formulas differ even though the source of the savings is the same.
