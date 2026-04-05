@@ -37,3 +37,23 @@ Bucketed DDP clearly improved over the naive and flat baselines, but it did not 
 Profiling note:
 
 The accompanying screenshots (`1mb.png`, `10mb.png`, `100mb.png`, `1000mb.png`) are consistent with this explanation. Smaller buckets show more frequent but earlier communication activity, while larger buckets show fewer but later communication regions and therefore less effective overlap. Since this implementation still performs explicit packing and copying around bucket communication, the reduction in collective-call overhead does not translate into a proportional end-to-end speedup.
+
+# Section 2.3.3(b): Idealized Bucketed-Communication Model
+
+Under the handout's simplifying assumption, each bucket contains `s / n_b` bytes and the payload communication time per bucket is `s / (n_b * w)`. In the ideal overlapped pipeline, the only payload communication that remains visible after backward is the final bucket, while each of the `n_b` communication calls still pays a fixed launch overhead `o`. This gives the idealized post-backward overhead model:
+
+```text
+T_overhead(n_b) = s / (n_b * w) + n_b * o
+```
+
+Setting the derivative to zero gives the optimal number of buckets:
+
+```text
+n_b* = sqrt(s / (w * o))
+```
+
+and therefore the corresponding optimal bucket size:
+
+```text
+b* = s / n_b* = sqrt(s * w * o)
+```

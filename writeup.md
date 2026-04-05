@@ -587,7 +587,29 @@ The profiler traces support the same interpretation. For small buckets (`1 MB` a
 
 **Deliverable:** An equation that models DDP overhead, and an equation for the optimal bucket size.
 
-**Answer:** TODO
+**Answer:** Let each bucket contain `s / n_b` bytes of gradients. Under the stated assumption, the time to compute one bucket of gradients equals the payload communication time for one bucket, so the payload communication time per bucket is `s / (n_b * w)`. In the ideal overlapped pipeline, the payload portion of most communication calls is hidden under the computation of later buckets, but two kinds of overhead remain visible after backward: the payload communication time of the final bucket, which has no later computation to hide behind, and the fixed launch overhead `o` for each of the `n_b` communication calls. Therefore a simple model for the post-backward DDP overhead is:
+
+```text
+T_overhead(n_b) = s / (n_b * w) + n_b * o
+```
+
+To minimize this expression, differentiate with respect to `n_b` and set the derivative to zero:
+
+```text
+dT_overhead / dn_b = -s / (w * n_b^2) + o = 0
+```
+
+which gives:
+
+```text
+n_b* = sqrt(s / (w * o))
+```
+
+Since the bucket size is `b = s / n_b`, the corresponding optimal bucket size is:
+
+```text
+b* = s / n_b* = sqrt(s * w * o)
+```
 
 ---
 
