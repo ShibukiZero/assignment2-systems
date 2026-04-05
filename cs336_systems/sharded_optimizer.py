@@ -86,6 +86,45 @@ class ShardedOptimizer(torch.optim.Optimizer):
         self._synchronize_updated_parameters()
         return loss
 
+    def state_dict(self) -> dict[str, Any]:
+        """
+        Serialize the wrapped local optimizer state instead of the wrapper's
+        empty `self.state`, while also preserving the wrapper param-group
+        metadata for round-trip loading.
+        """
+        wrapper_state_dict = super().state_dict()
+        if self._local_optimizer is None:
+            return {
+                "state": {},
+                "param_groups": [],
+                "wrapper_param_groups": wrapper_state_dict["param_groups"],
+            }
+
+        local_state_dict = self._local_optimizer.state_dict()
+        return {
+            "state": local_state_dict["state"],
+            "param_groups": local_state_dict["param_groups"],
+            "wrapper_param_groups": wrapper_state_dict["param_groups"],
+        }
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """
+        Restore both the wrapped local optimizer state and the wrapper's
+        full-model param-group metadata.
+        """
+        self._load_wrapper_param_groups(state_dict.get("wrapper_param_groups"))
+
+        local_optimizer_state_dict = {
+            "state": state_dict.get("state", {}),
+            "param_groups": state_dict.get("param_groups", []),
+        }
+        if self._local_optimizer is None:
+            if local_optimizer_state_dict["state"] or local_optimizer_state_dict["param_groups"]:
+                raise ValueError("Cannot load non-empty local optimizer state on a rank with no owned parameters.")
+            return
+
+        self._local_optimizer.load_state_dict(local_optimizer_state_dict)
+
     def _build_local_param_group(self, full_group: dict[str, Any]) -> dict[str, Any] | None:
         owned_parameters = [
             parameter
@@ -105,6 +144,21 @@ class ShardedOptimizer(torch.optim.Optimizer):
             return
 
         self._local_optimizer = self.optimizer_cls(self._local_param_groups, **self.optimizer_kwargs)
+
+    def _load_wrapper_param_groups(self, serialized_param_groups: list[dict[str, Any]] | None) -> None:
+        if serialized_param_groups is None:
+            return
+        if len(serialized_param_groups) != len(self.param_groups):
+            raise ValueError("Loaded state_dict has a different number of wrapper parameter groups.")
+
+        for serialized_group, current_group in zip(serialized_param_groups, self.param_groups):
+            if len(serialized_group["params"]) != len(current_group["params"]):
+                raise ValueError("Loaded state_dict is incompatible with the current wrapper parameter groups.")
+
+            current_parameters = current_group["params"]
+            current_group.clear()
+            current_group.update({key: value for key, value in serialized_group.items() if key != "params"})
+            current_group["params"] = current_parameters
 
     def _step_local_optimizer(self, closure=None, **kwargs):
         if self._local_optimizer is None:
