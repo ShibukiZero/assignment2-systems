@@ -48,3 +48,11 @@ Required H100 80GB count including activations:
 ```text
 ceil((3,517,578,215,424 + 17,547,264 * B * T) / (80 * 10^9))
 ```
+
+Typical examples using the assignment-wide default `B = 4`:
+
+| Batch size | Context length | Saved activations (GiB) | Total required H100 80GB GPUs |
+| --- | ---: | ---: | ---: |
+| 4 | 128 | 8.367 | 44.082 |
+| 4 | 256 | 16.734 | 44.194 |
+| 4 | 512 | 33.469 | 44.419 |
