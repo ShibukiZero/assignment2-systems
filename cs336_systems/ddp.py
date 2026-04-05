@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 
 import torch
 import torch.distributed as dist
@@ -17,6 +18,25 @@ def _iter_unique_parameters(module: nn.Module) -> Iterator[nn.Parameter]:
             continue
         seen.add(parameter_id)
         yield parameter
+
+
+@dataclass
+class _Bucket:
+    """
+    Minimal bookkeeping for one bucket of parameters.
+
+    This is intentionally lightweight: for the first bucketed implementation,
+    it is enough to know which parameters belong to the bucket, when all of
+    them are ready, and which async communication handle corresponds to the
+    in-flight all-reduce.
+    """
+
+    parameters: list[nn.Parameter]
+    size_bytes: int
+    ready_parameter_ids: set[int] = field(default_factory=set)
+    pending_handle: dist.Work | None = None
+    flat_grad_buffer: torch.Tensor | None = None
+    grad_views: list[torch.Tensor] = field(default_factory=list)
 
 
 class _BaseDDP(nn.Module):
@@ -154,6 +174,151 @@ class OverlapIndividualGradDDP(_BaseDDP):
             self._pending_gradient_syncs.append((parameter, handle))
 
         return _hook
+
+
+class BucketedGradDDP(_BaseDDP):
+    """
+    Section 2.3.3 skeleton: bucket parameters, overlap communication when an
+    entire bucket becomes ready, and wait before optimizer.step().
+
+    This version is intentionally a teaching skeleton. The non-core wiring
+    is in place, while the bucket-ready / launch / wait flow is left as TODOs.
+    """
+
+    def __init__(self, module: nn.Module, bucket_size_mb: float):
+        self.bucket_size_mb = bucket_size_mb
+        super().__init__(module)
+        self.buckets = self._build_buckets(bucket_size_mb)
+        self.parameter_to_bucket = {
+            id(parameter): bucket
+            for bucket in self.buckets
+            for parameter in bucket.parameters
+        }
+        self._hook_handles: list[torch.utils.hooks.RemovableHandle] = []
+        self._register_bucket_hooks()
+
+    def on_train_batch_start(self) -> None:
+        """
+        Reset per-bucket bookkeeping at the start of each training step.
+
+        tests/test_ddp.py calls this hook explicitly before zero_grad().
+        """
+        for bucket in self.buckets:
+            bucket.ready_parameter_ids.clear()
+            bucket.pending_handle = None
+            bucket.flat_grad_buffer = None
+            bucket.grad_views.clear()
+
+    def finish_gradient_synchronization(self) -> None:
+        if not dist.is_initialized() or self.world_size == 1:
+            return
+
+        # TODO(student): for each bucket that launched async communication,
+        # wait on its handle, divide the synchronized gradients by world_size,
+        # and if you packed into a temporary flat buffer, scatter the values
+        # back into the original param.grad tensors.
+        #
+        # Hint:
+        #   1. bucket.pending_handle.wait()
+        #   2. bucket.flat_grad_buffer /= self.world_size
+        #   3. unpack with _unflatten_dense_tensors(...) and copy_ back
+        # raise NotImplementedError("TODO: wait on bucket handles and restore averaged gradients.")
+        for bucket in self.buckets:
+            if bucket.pending_handle is not None:
+                bucket.pending_handle.wait()
+                if bucket.flat_grad_buffer is not None:
+                    bucket.flat_grad_buffer /= self.world_size
+                    synchronized_gradients = _unflatten_dense_tensors(bucket.flat_grad_buffer, bucket.grad_views)
+                    for grad_view, synchronized_gradient in zip(bucket.grad_views, synchronized_gradients):
+                        grad_view.copy_(synchronized_gradient)
+                    bucket.ready_parameter_ids.clear()
+                    bucket.pending_handle = None
+                    bucket.flat_grad_buffer = None
+                    bucket.grad_views.clear()
+
+    def _build_buckets(self, bucket_size_mb: float) -> list[_Bucket]:
+        """
+        Build buckets using reverse parameter order, as suggested by the handout.
+
+        This part is intentionally fully implemented because it is mostly
+        bookkeeping rather than the core communication logic.
+        """
+        max_bucket_bytes = int(bucket_size_mb * 1024 * 1024)
+        if max_bucket_bytes <= 0:
+            raise ValueError(f"bucket_size_mb must be positive, got {bucket_size_mb}.")
+
+        buckets: list[_Bucket] = []
+        current_bucket_parameters: list[nn.Parameter] = []
+        current_bucket_bytes = 0
+
+        for parameter in reversed(list(self._iter_trainable_parameters())):
+            parameter_bytes = parameter.numel() * parameter.element_size()
+
+            if current_bucket_parameters and current_bucket_bytes + parameter_bytes > max_bucket_bytes:
+                buckets.append(_Bucket(parameters=current_bucket_parameters, size_bytes=current_bucket_bytes))
+                current_bucket_parameters = []
+                current_bucket_bytes = 0
+
+            current_bucket_parameters.append(parameter)
+            current_bucket_bytes += parameter_bytes
+
+        if current_bucket_parameters:
+            buckets.append(_Bucket(parameters=current_bucket_parameters, size_bytes=current_bucket_bytes))
+
+        return buckets
+
+    def _register_bucket_hooks(self) -> None:
+        for parameter in self._iter_trainable_parameters():
+            self._hook_handles.append(parameter.register_post_accumulate_grad_hook(self._make_bucket_hook(parameter)))
+
+    def _make_bucket_hook(self, parameter: nn.Parameter):
+        def _hook(_unused_param: nn.Parameter) -> None:
+            if not dist.is_initialized() or self.world_size == 1:
+                return
+            if parameter.grad is None:
+                return
+
+            # TODO(student): mark this parameter as ready in its bucket.
+            # When all parameters in that bucket are ready, launch one async
+            # all-reduce for the bucket instead of one per parameter.
+            #
+            # Recommended shape of the logic:
+            #   1. bucket = self.parameter_to_bucket[id(parameter)]
+            #   2. bucket.ready_parameter_ids.add(id(parameter))
+            #   3. if len(bucket.ready_parameter_ids) == len(bucket.parameters):
+            #          self._launch_bucket_async_allreduce(bucket)
+            # raise NotImplementedError("TODO: mark bucket readiness and launch async bucket communication.")
+            bucket = self.parameter_to_bucket[id(parameter)]
+            bucket.ready_parameter_ids.add(id(parameter))
+            if len(bucket.ready_parameter_ids) == len(bucket.parameters) and bucket.pending_handle is None:
+                self._launch_bucket_async_allreduce(bucket)
+
+        return _hook
+
+    def _launch_bucket_async_allreduce(self, bucket: _Bucket) -> None:
+        """
+        Start one async all-reduce for a ready bucket.
+
+        The most naive version is perfectly fine to start with:
+        1. read [parameter.grad for parameter in bucket.parameters],
+        2. flatten them into a temporary communication buffer,
+        3. call dist.all_reduce(..., async_op=True),
+        4. store the flat buffer + handle on the bucket for finish_gradient_synchronization().
+        """
+        # TODO(student): implement the naive bucket launch path.
+        #
+        # Hint:
+        #   gradients = [parameter.grad for parameter in bucket.parameters]
+        #   bucket.grad_views = gradients
+        #   bucket.flat_grad_buffer = _flatten_dense_tensors(gradients)
+        #   bucket.pending_handle = dist.all_reduce(bucket.flat_grad_buffer, async_op=True)
+        # raise NotImplementedError("TODO: flatten one bucket and launch async all-reduce.")
+        gradients = [parameter.grad for parameter in bucket.parameters if parameter.grad is not None]
+        bucket.grad_views = gradients
+        bucket.flat_grad_buffer = _flatten_dense_tensors(gradients)
+        bucket.pending_handle = dist.all_reduce(bucket.flat_grad_buffer, op=dist.ReduceOp.SUM, async_op=True)
+
+
 
 
 def naive_ddp_train_step(
