@@ -178,11 +178,15 @@ class OverlapIndividualGradDDP(_BaseDDP):
 
 class BucketedGradDDP(_BaseDDP):
     """
-    Section 2.3.3 skeleton: bucket parameters, overlap communication when an
-    entire bucket becomes ready, and wait before optimizer.step().
+    Section 2.3.3 implementation: bucket parameters, launch one async
+    all-reduce when a whole bucket becomes ready, and wait before optimizer.step().
 
-    This version is intentionally a teaching skeleton. The non-core wiring
-    is in place, while the bucket-ready / launch / wait flow is left as TODOs.
+    This is the most direct bucketed version:
+    1. build buckets in reverse parameter order,
+    2. mark parameters as ready through post-accumulate-grad hooks,
+    3. flatten a ready bucket into one temporary communication buffer,
+    4. asynchronously all-reduce that buffer,
+    5. wait and scatter the synchronized gradients back before optimizer.step().
     """
 
     def __init__(self, module: nn.Module, bucket_size_mb: float):
@@ -204,25 +208,12 @@ class BucketedGradDDP(_BaseDDP):
         tests/test_ddp.py calls this hook explicitly before zero_grad().
         """
         for bucket in self.buckets:
-            bucket.ready_parameter_ids.clear()
-            bucket.pending_handle = None
-            bucket.flat_grad_buffer = None
-            bucket.grad_views.clear()
+            self._reset_bucket_runtime_state(bucket)
 
     def finish_gradient_synchronization(self) -> None:
         if not dist.is_initialized() or self.world_size == 1:
             return
 
-        # TODO(student): for each bucket that launched async communication,
-        # wait on its handle, divide the synchronized gradients by world_size,
-        # and if you packed into a temporary flat buffer, scatter the values
-        # back into the original param.grad tensors.
-        #
-        # Hint:
-        #   1. bucket.pending_handle.wait()
-        #   2. bucket.flat_grad_buffer /= self.world_size
-        #   3. unpack with _unflatten_dense_tensors(...) and copy_ back
-        # raise NotImplementedError("TODO: wait on bucket handles and restore averaged gradients.")
         for bucket in self.buckets:
             if bucket.pending_handle is not None:
                 bucket.pending_handle.wait()
@@ -231,10 +222,7 @@ class BucketedGradDDP(_BaseDDP):
                     synchronized_gradients = _unflatten_dense_tensors(bucket.flat_grad_buffer, bucket.grad_views)
                     for grad_view, synchronized_gradient in zip(bucket.grad_views, synchronized_gradients):
                         grad_view.copy_(synchronized_gradient)
-                    bucket.ready_parameter_ids.clear()
-                    bucket.pending_handle = None
-                    bucket.flat_grad_buffer = None
-                    bucket.grad_views.clear()
+                self._reset_bucket_runtime_state(bucket)
 
     def _build_buckets(self, bucket_size_mb: float) -> list[_Bucket]:
         """
@@ -278,16 +266,6 @@ class BucketedGradDDP(_BaseDDP):
             if parameter.grad is None:
                 return
 
-            # TODO(student): mark this parameter as ready in its bucket.
-            # When all parameters in that bucket are ready, launch one async
-            # all-reduce for the bucket instead of one per parameter.
-            #
-            # Recommended shape of the logic:
-            #   1. bucket = self.parameter_to_bucket[id(parameter)]
-            #   2. bucket.ready_parameter_ids.add(id(parameter))
-            #   3. if len(bucket.ready_parameter_ids) == len(bucket.parameters):
-            #          self._launch_bucket_async_allreduce(bucket)
-            # raise NotImplementedError("TODO: mark bucket readiness and launch async bucket communication.")
             bucket = self.parameter_to_bucket[id(parameter)]
             bucket.ready_parameter_ids.add(id(parameter))
             if len(bucket.ready_parameter_ids) == len(bucket.parameters) and bucket.pending_handle is None:
@@ -299,24 +277,22 @@ class BucketedGradDDP(_BaseDDP):
         """
         Start one async all-reduce for a ready bucket.
 
-        The most naive version is perfectly fine to start with:
-        1. read [parameter.grad for parameter in bucket.parameters],
-        2. flatten them into a temporary communication buffer,
-        3. call dist.all_reduce(..., async_op=True),
-        4. store the flat buffer + handle on the bucket for finish_gradient_synchronization().
+        This implementation uses the most direct pack-and-launch path:
+        1. gather the ready per-parameter gradients,
+        2. flatten them into one temporary communication buffer,
+        3. launch a single async all-reduce for that buffer,
+        4. store the runtime state on the bucket for finish_gradient_synchronization().
         """
-        # TODO(student): implement the naive bucket launch path.
-        #
-        # Hint:
-        #   gradients = [parameter.grad for parameter in bucket.parameters]
-        #   bucket.grad_views = gradients
-        #   bucket.flat_grad_buffer = _flatten_dense_tensors(gradients)
-        #   bucket.pending_handle = dist.all_reduce(bucket.flat_grad_buffer, async_op=True)
-        # raise NotImplementedError("TODO: flatten one bucket and launch async all-reduce.")
         gradients = [parameter.grad for parameter in bucket.parameters if parameter.grad is not None]
         bucket.grad_views = gradients
         bucket.flat_grad_buffer = _flatten_dense_tensors(gradients)
         bucket.pending_handle = dist.all_reduce(bucket.flat_grad_buffer, op=dist.ReduceOp.SUM, async_op=True)
+
+    def _reset_bucket_runtime_state(self, bucket: _Bucket) -> None:
+        bucket.ready_parameter_ids.clear()
+        bucket.pending_handle = None
+        bucket.flat_grad_buffer = None
+        bucket.grad_views.clear()
 
 
 
