@@ -634,7 +634,7 @@ b* = s / n_b* = sqrt(s * w * o)
 
 **Deliverable:** Your calculations and a one-sentence response.
 
-**Answer:** TODO
+**Answer:** Following the mixed FSDP + TP forward-pass model from the Scaling Book, we compare `T_math = 4 * B * D * F / (N * C)` against `T_comms = max(T_FSDP, T_TP)`, where `T_FSDP = 4 * D * F / (Y * W_ici * M_X)` and `T_TP = 4 * B * D / (X * W_ici * M_Y)`. Writing `b = B / N` for the per-device token batch size and using `C = 4.6 * 10^14`, `W_ici = 2 * 9 * 10^10`, `Y = 4`, and `M_X = 2`, the FSDP-side compute-bound threshold is `b >= C / (Y * W_ici * M_X) = 2555.56 / (4 * 2) = 319.44` tokens per device, so the minimum integer per-device batch is `320` tokens. With `N = X * Y = 64`, the corresponding overall token batch threshold is `319.44 * 64 = 20,444.44`, so the minimum integer overall batch is `20,480` tokens. The TP-side condition `F >= (C / W_ici) * (Y / M_Y)` is also satisfied because `53,248 > 10,222.22`, so the FSDP communication term is the limiting factor. The full derivation is archived in [question_c_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_c_summary.md).
 
 ### (d)
 **Question:** In practice, we want the overall batch size to be as small as possible while staying compute efficient instead of communication bound. What tricks can we use to reduce the batch size while retaining high throughput?

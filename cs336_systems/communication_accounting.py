@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from dataclasses import asdict, dataclass
 
 
@@ -16,6 +17,12 @@ class XXLConfig:
     num_blocks: int = 126
     h100_capacity_gb: float = 80.0
     tpu_v5p_capacity_gb: float = 95.0
+    tpu_v5p_ici_bandwidth: float = 2 * 9 * 10**10
+    tpu_v5p_flops: float = 4.6 * 10**14
+    mesh_x: int = 16
+    mesh_y: int = 4
+    mesh_axes_x: int = 2
+    mesh_axes_y: int = 1
     batch_size: int | None = None
     context_length: int | None = None
 
@@ -244,6 +251,105 @@ def build_question_b_report(config: XXLConfig) -> dict[str, object]:
     return report
 
 
+def total_mesh_devices(config: XXLConfig) -> int:
+    return config.mesh_x * config.mesh_y
+
+
+def arithmetic_intensity_alpha(config: XXLConfig) -> float:
+    return config.tpu_v5p_flops / config.tpu_v5p_ici_bandwidth
+
+
+def fsdp_tp_forward_math_formula() -> str:
+    return "T_math = 4 * B * D * F / (N * C)"
+
+
+def fsdp_tp_forward_fsdp_comms_formula() -> str:
+    return "T_FSDP = 4 * D * F / (Y * W_ici * M_X)"
+
+
+def fsdp_tp_forward_tp_comms_formula() -> str:
+    return "T_TP = 4 * B * D / (X * W_ici * M_Y)"
+
+
+def per_device_token_batch_threshold_formula() -> str:
+    return "b >= C / (Y * W_ici * M_X) = alpha / (Y * M_X)"
+
+
+def tp_feasibility_formula() -> str:
+    return "F >= (C / W_ici) * (Y / M_Y) = alpha * Y / M_Y"
+
+
+def per_device_token_batch_threshold(config: XXLConfig) -> float:
+    return config.tpu_v5p_flops / (
+        config.mesh_y * config.tpu_v5p_ici_bandwidth * config.mesh_axes_x
+    )
+
+
+def tp_compute_bound_condition_satisfied(config: XXLConfig) -> bool:
+    rhs = arithmetic_intensity_alpha(config) * config.mesh_y / config.mesh_axes_y
+    return config.d_ff >= rhs
+
+
+def build_question_c_report(config: XXLConfig) -> dict[str, object]:
+    alpha = arithmetic_intensity_alpha(config)
+    threshold_tokens = per_device_token_batch_threshold(config)
+    minimum_integer_tokens = math.ceil(threshold_tokens)
+    total_devices = total_mesh_devices(config)
+    overall_threshold_tokens = threshold_tokens * total_devices
+    minimum_integer_overall_tokens = minimum_integer_tokens * total_devices
+    tp_rhs = alpha * config.mesh_y / config.mesh_axes_y
+
+    report: dict[str, object] = {
+        "forward_time_formulas": {
+            "math": fsdp_tp_forward_math_formula(),
+            "fsdp_communication": fsdp_tp_forward_fsdp_comms_formula(),
+            "tp_communication": fsdp_tp_forward_tp_comms_formula(),
+        },
+        "compute_bound_condition": "T_math >= max(T_FSDP, T_TP)",
+        "per_device_token_batch_threshold": {
+            "formula": per_device_token_batch_threshold_formula(),
+            "value": threshold_tokens,
+            "minimum_integer_value": minimum_integer_tokens,
+        },
+        "overall_token_batch_threshold": {
+            "formula": "B = b * N",
+            "value": overall_threshold_tokens,
+            "minimum_integer_value": minimum_integer_overall_tokens,
+        },
+        "tp_communication_check": {
+            "formula": tp_feasibility_formula(),
+            "lhs_d_ff": config.d_ff,
+            "rhs": tp_rhs,
+            "condition_satisfied": tp_compute_bound_condition_satisfied(config),
+        },
+        "hardware_constants": {
+            "C_flops_per_device": config.tpu_v5p_flops,
+            "W_ici_bytes_per_second": config.tpu_v5p_ici_bandwidth,
+            "alpha": alpha,
+            "X": config.mesh_x,
+            "Y": config.mesh_y,
+            "M_X": config.mesh_axes_x,
+            "M_Y": config.mesh_axes_y,
+            "N": total_devices,
+        },
+    }
+
+    if config.context_length is not None and config.context_length > 0:
+        report["equivalent_sequence_batch_if_context_length_fixed"] = {
+            "context_length": config.context_length,
+            "per_device_sequences": threshold_tokens / config.context_length,
+            "minimum_integer_per_device_sequences": math.ceil(
+                minimum_integer_tokens / config.context_length
+            ),
+            "overall_sequences": overall_threshold_tokens / config.context_length,
+            "minimum_integer_overall_sequences": math.ceil(
+                minimum_integer_overall_tokens / config.context_length
+            ),
+        }
+
+    return report
+
+
 def parse_args() -> XXLConfig:
     parser = argparse.ArgumentParser(
         description=(
@@ -256,6 +362,12 @@ def parse_args() -> XXLConfig:
     parser.add_argument("--num-blocks", type=int, default=126)
     parser.add_argument("--h100-capacity-gb", type=float, default=80.0)
     parser.add_argument("--tpu-v5p-capacity-gb", type=float, default=95.0)
+    parser.add_argument("--tpu-v5p-ici-bandwidth", type=float, default=2 * 9 * 10**10)
+    parser.add_argument("--tpu-v5p-flops", type=float, default=4.6 * 10**14)
+    parser.add_argument("--mesh-x", type=int, default=16)
+    parser.add_argument("--mesh-y", type=int, default=4)
+    parser.add_argument("--mesh-axes-x", type=int, default=2)
+    parser.add_argument("--mesh-axes-y", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--context-length", type=int, default=None)
     args = parser.parse_args()
@@ -265,6 +377,12 @@ def parse_args() -> XXLConfig:
         num_blocks=args.num_blocks,
         h100_capacity_gb=args.h100_capacity_gb,
         tpu_v5p_capacity_gb=args.tpu_v5p_capacity_gb,
+        tpu_v5p_ici_bandwidth=args.tpu_v5p_ici_bandwidth,
+        tpu_v5p_flops=args.tpu_v5p_flops,
+        mesh_x=args.mesh_x,
+        mesh_y=args.mesh_y,
+        mesh_axes_x=args.mesh_axes_x,
+        mesh_axes_y=args.mesh_axes_y,
         batch_size=args.batch_size,
         context_length=args.context_length,
     )
@@ -275,6 +393,7 @@ def main() -> None:
     report = {
         "question_a": build_question_a_report(config),
         "question_b": build_question_b_report(config),
+        "question_c": build_question_c_report(config),
     }
     print(json.dumps(report, indent=2))
 
