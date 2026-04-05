@@ -61,10 +61,18 @@ class ShardedOptimizer(torch.optim.Optimizer):
         on the wrapped local optimizer.
 
         TODO:
-        - Confirm why we keep the *full* param group on `self.param_groups`
-          even though the wrapped optimizer only sees a shard.
-        - Walk through a tied-weight example and make sure the owner mapping is
-          stable across all ranks.
+        - Keep the *full* param group on `self.param_groups` so the wrapper
+          still behaves like a normal PyTorch optimizer for APIs such as
+          `zero_grad()`. The wrapped local optimizer is only for `step()`.
+        - Build a matching local param group that contains exactly the
+          parameters owned by `self.rank`, while copying all hyperparameters
+          (`lr`, `betas`, `weight_decay`, etc.) from the full group.
+        - Verify that ownership is stable across all ranks:
+          1. the same parameter object must always map to the same owner rank,
+          2. tied weights must not accidentally get assigned to two owners,
+          3. every rank must see parameters in the same global order.
+        - If this method is called after initialization, make sure the new
+          local group is added to the already-constructed wrapped optimizer.
         """
         normalized_group = _normalize_param_group(param_group)
         torch.optim.Optimizer.add_param_group(self, normalized_group)
@@ -90,18 +98,28 @@ class ShardedOptimizer(torch.optim.Optimizer):
         parameters visible on every rank.
 
         TODO:
-        - Decide where the reduced gradients come from in your final design.
-          This wrapper should not silently assume a specific DDP implementation.
-        - Implement parameter synchronization after the local shard update.
-          The handout text suggests owner-to-all broadcast; if you choose a
-          different collective, be ready to justify the equivalence.
-        - After you wire communication, compare this step ordering against a
-          plain AdamW baseline and explain why the final weights should match.
+        - Treat `self._local_optimizer.step(...)` as "update only the
+          parameters owned by this rank". Non-owned parameters must remain
+          untouched on this rank until synchronization.
+        - Decide what precondition you expect for gradients before `step()`:
+          the most direct assignment-compatible assumption is that for each
+          owned parameter, `parameter.grad` is already the full reduced
+          gradient tensor for that parameter.
+        - After the local shard update, synchronize the updated parameter
+          values to all other ranks. The handout wording suggests owner-to-all
+          broadcast as the first implementation to try.
+        - Once synchronization is in place, sanity-check the optimizer step
+          ordering against a plain AdamW baseline:
+          1. both use the same gradient values,
+          2. each parameter is updated exactly once,
+          3. all ranks end the step with identical parameter tensors.
         """
         loss = None
         if self._local_optimizer is not None:
-            loss = self._local_optimizer.step(closure=closure, **kwargs)
-
+            if closure is not None:
+                loss = self._local_optimizer.step(closure=closure, **kwargs)
+            else:
+                loss = self._local_optimizer.step(**kwargs)
         self._synchronize_updated_parameters()
         return loss
 
@@ -134,16 +152,33 @@ class ShardedOptimizer(torch.optim.Optimizer):
         Synchronize the updated parameter values after the wrapped local step.
 
         TODO:
-        - For each parameter tensor, identify the owner rank and communicate
-          the owner's post-step value to every other rank.
-        - Keep the implementation at the parameter-tensor granularity first.
-          If you later batch parameters into flat buffers, do it only after
-          the single-tensor version is obviously correct.
-        - Sanity-check the expected input here: for an owned parameter, the
-          update should be computed from a full reduced gradient tensor, not a
-          per-rank slice of that tensor.
+        - First build the simplest correct version:
+          1. iterate over every parameter in `self.param_groups`,
+          2. look up its owner rank with `_get_owner_rank(parameter)`,
+          3. call `dist.broadcast(parameter.data, src=owner_rank)`.
+        - The expected semantics are:
+          1. on the owner rank, `parameter.data` already contains the new
+             post-step value,
+          2. on non-owner ranks, `parameter.data` is stale and must be
+             overwritten by the owner's value,
+          3. after the broadcast loop, all ranks should hold identical model
+             parameters.
+        - Keep the first version at per-parameter granularity. Only consider
+          flattening / batching parameters after you have proved correctness.
+        - After implementing this, add a quick manual check for yourself:
+          gather each parameter across ranks and confirm that all copies match
+          after every optimizer step.
         """
         if not dist.is_initialized() or self.world_size == 1:
             return
 
-        raise NotImplementedError("TODO: synchronize updated parameters across ranks after local optimizer.step().")
+        # raise NotImplementedError("TODO: synchronize updated parameters across ranks after local optimizer.step().")
+        seen_parameter_ids: set[int] = set()
+        for param_group in self.param_groups:
+            for parameter in param_group["params"]:
+                parameter_id = id(parameter)
+                if parameter_id in seen_parameter_ids:
+                    continue
+                seen_parameter_ids.add(parameter_id)
+                owner_rank = self._get_owner_rank(parameter)
+                dist.broadcast(parameter.data, src=owner_rank)
