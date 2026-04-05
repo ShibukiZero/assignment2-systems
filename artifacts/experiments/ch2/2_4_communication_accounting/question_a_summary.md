@@ -24,7 +24,7 @@ FP32 memory:
 
 Equivalent H100 80GB count:
 
-- `3,517,578,215,424 / (80 * 10^9) = 43.97`
+- Lower bound without activations: `3,517,578,215,424 / (80 * 10^9) = 43.97`
 
 Saved activations for backward:
 
@@ -35,4 +35,16 @@ Saved activations for backward:
 num_blocks * B * T * (d_model + d_ff) * 2 bytes
 = 126 * B * T * (16384 + 53248) * 2 bytes
 = 17,547,264 * B * T bytes
+```
+
+Total training memory including saved activations:
+
+```text
+3,517,578,215,424 + 17,547,264 * B * T bytes
+```
+
+Required H100 80GB count including activations:
+
+```text
+ceil((3,517,578,215,424 + 17,547,264 * B * T) / (80 * 10^9))
 ```

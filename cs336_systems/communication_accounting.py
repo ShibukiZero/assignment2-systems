@@ -79,6 +79,19 @@ def saved_activations_bf16_formula(config: XXLConfig) -> str:
     return f"{coefficient} * B * T bytes"
 
 
+def total_training_memory_formula(config: XXLConfig) -> str:
+    fp32_total = total_fp32_model_state_bytes(config)
+    coefficient = config.num_blocks * (config.d_model + config.d_ff) * BF16_BYTES
+    return f"{fp32_total} + {coefficient} * B * T bytes"
+
+
+def required_h100_formula(config: XXLConfig) -> str:
+    fp32_total = total_fp32_model_state_bytes(config)
+    coefficient = config.num_blocks * (config.d_model + config.d_ff) * BF16_BYTES
+    denominator = config.h100_capacity_gb * 10**9
+    return f"ceil(({fp32_total} + {coefficient} * B * T) / {denominator})"
+
+
 def bytes_to_gib(num_bytes: int) -> float:
     return num_bytes / (1024**3)
 
@@ -116,6 +129,14 @@ def build_question_a_report(config: XXLConfig) -> dict[str, float | int | dict[s
         "saved_activations_bf16": {
             "formula": "num_blocks * B * T * (d_model + d_ff) * 2 bytes",
             "instantiated_formula": saved_activations_bf16_formula(config),
+        },
+        "total_training_memory": {
+            "formula": "fp32_model_state_total + saved_activations_bf16",
+            "instantiated_formula": total_training_memory_formula(config),
+        },
+        "required_h100_80gb": {
+            "lower_bound_without_activations": h100_80gb_equivalent(fp32_total, config.h100_capacity_gb),
+            "formula_including_activations": required_h100_formula(config),
         },
     }
 
