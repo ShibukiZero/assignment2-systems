@@ -1,7 +1,7 @@
 ## Problem `benchmarking_script`: Benchmarking Script (4 points)
 
 ### (b)
-**Question:** Time the forward and backward passes for the model sizes described in Section 1.1.2. Use 5 warmup steps and compute the average and standard deviation over 10 measurement steps. How long does a forward pass take? How about a backward pass? Do you see high variability across measurements, or is the standard deviation small?
+**Question:** Time the forward and backward passes for the model sizes described in §1.1.2. Use 5 warmup steps and compute the average and standard deviation of timings over 10 measurement steps. How long does a forward pass take? How about a backward pass? Do you see high variability across measurements, or is the standard deviation small?
 
 **Deliverable:** A 1-2 sentence response with your timings.
 
@@ -16,7 +16,7 @@
 | 2.7b | 158.532 | 0.209 | 316.248 | 0.187 | 474.780 | 0.315 |
 
 ### (c)
-**Question:** Repeat the analysis without warmup steps. How does this affect your results? Why do you think this happens? Also try 1 or 2 warmup steps. Why might the result still be different?
+**Question:** One caveat of benchmarking is not performing the warm-up steps. Repeat your analysis without the warm-up steps. How does this affect your results? Why do you think this happens? Also try to run the script with 1 or 2 warm-up steps. Why might the result still be different?
 
 **Deliverable:** A 2-3 sentence response.
 
@@ -27,35 +27,35 @@
 ## Problem `nsys_profile`: Nsight Systems Profiler (5 points)
 
 ### (a)
-**Question:** What is the total time spent on the forward pass? Does it match what was measured before with the Python standard library?
+**Question:** What is the total time spent on your forward pass? Does it match what we had measured before with the Python standard library?
 
 **Deliverable:** A 1-2 sentence response.
 
 **Answer:** At context length 128, Nsight Systems reports forward-pass times of 25.245 ms (`small`), 49.488 ms (`medium`), 75.931 ms (`large`), 101.033 ms (`xl`), and 158.597 ms (`2.7b`). Compared with the earlier Python benchmark from `1.1.3(b)` (21.837 ms, 42.146 ms, 62.412 ms, 101.257 ms, and 158.532 ms respectively), the agreement is very close for `xl` and `2.7b`, but noticeably looser for the smaller three models, so the overall trend matches while the exact values do not align equally well across all sizes.
 
 ### (b)
-**Question:** What CUDA kernel takes the most cumulative GPU time during the forward pass? How many times is this kernel invoked during a single forward pass of the model? Is it the same kernel that takes the most runtime when you do both forward and backward passes?
+**Question:** What CUDA kernel takes the most cumulative GPU time during the forward pass? How many times is this kernel invoked during a single forward pass of your model? Is it the same kernel that takes the most runtime when you do both forward and backward passes?
 
 **Deliverable:** A 1-2 sentence response.
 
 **Answer:** In a representative `2.7b`, context-length-512 forward trace, the CUDA GPU Kernel Summary is dominated by the Tensor Core GEMM kernel `sm80_xmma_gemm_f32f32_f32f32_f32_tn_n_tilesize64x64x8_...`, which appears 975 times across the 15 profiled forward passes, i.e. about 65 times per forward pass. In the corresponding full training-step trace, the top kernel is still a Tensor Core GEMM, but it changes to `sm80_xmma_gemm_f32f32_f32f32_f32_tn_n_tilesize128x64x8_...` rather than remaining exactly the same kernel.
 
 ### (c)
-**Question:** Besides matrix multiplies, what other kernels account for non-trivial CUDA runtime in the forward pass?
+**Question:** Although the vast majority of FLOPs take place in matrix multiplications, you will notice that several other kernels still take a non-trivial amount of the overall runtime. What other kernels besides matrix multiplies do you see accounting for non-trivial CUDA runtime in the forward pass?
 
 **Deliverable:** A 1-2 sentence response.
 
 **Answer:** Besides GEMM kernels, the CUDA GPU Kernel Summary still shows visible time in ATen `elementwise_kernel`, `vectorized_elementwise_kernel`, and `reduce_kernel` launches. In the representative `2.7b`, context-length-512 forward trace, these non-matmul kernels are much smaller than the dominant GEMMs, but several still contribute on the order of about 0.5%-1.5% each to total GPU time.
 
 ### (d)
-**Question:** Profile one complete training step with AdamW. How does the fraction of time spent on matrix multiplication change compared to inference-only? How about other kernels?
+**Question:** Profile running one complete training step with your implementation of AdamW (i.e., the forward pass, computing the loss and running a backward pass, and finally an optimizer step, as you'd do during training). How does the fraction of time spent on matrix multiplication change, compared to doing inference (forward pass only)? How about other kernels?
 
 **Deliverable:** A 1-2 sentence response.
 
 **Answer:** In the representative `2.7b`, context-length-512 traces, kernels whose names contain `gemm`, `xmma`, or `cutlass` account for about `92.20%` of forward-only GPU time but about `83.90%` of full training-step GPU time, so matrix multiplication still dominates training but by a smaller margin than in inference. The missing share is taken up by backward- and optimizer-related ATen `elementwise_kernel`, `vectorized_elementwise_kernel`, and `reduce_kernel` launches, which become much more prominent once gradient computation and AdamW updates are included.
 
 ### (e)
-**Question:** Compare the runtime of the softmax operation versus the matrix multiplication operations within the self-attention layer during a forward pass. How does the runtime difference compare to the FLOP difference?
+**Question:** Compare the runtime of the softmax operation versus the matrix multiplication operations within the self-attention layer of your model during a forward pass. How does the difference in runtimes compare to the difference in FLOPs?
 
 **Deliverable:** A 1-2 sentence response.
 
@@ -66,25 +66,29 @@
 ## Problem `mixed_precision_accumulation`: Mixed Precision (1 point)
 
 ### Accumulation experiment
-**Question:** Run the accumulation example from the handout and comment on the accuracy of the results.
+**Question:** Run the following code and comment on the accuracy of the results.
 
 ```python
 s = torch.tensor(0, dtype=torch.float32)
 for i in range(1000):
     s += torch.tensor(0.01, dtype=torch.float32)
+print(s)
 
 s = torch.tensor(0, dtype=torch.float16)
 for i in range(1000):
     s += torch.tensor(0.01, dtype=torch.float16)
+print(s)
 
 s = torch.tensor(0, dtype=torch.float32)
 for i in range(1000):
     s += torch.tensor(0.01, dtype=torch.float16)
+print(s)
 
 s = torch.tensor(0, dtype=torch.float32)
 for i in range(1000):
     x = torch.tensor(0.01, dtype=torch.float16)
     s += x.type(torch.float32)
+print(s)
 ```
 
 **Deliverable:** A 2-3 sentence response.
@@ -92,7 +96,7 @@ for i in range(1000):
 **Answer:** Accumulating `0.01` in FP32 stays very close to the expected value of `10`, while accumulating in FP16 underestimates much more noticeably (`9.9531` in our run), because both the input value and the running sum are repeatedly rounded at FP16 precision. Using FP16 inputs with an FP32 accumulator is much more accurate (`10.0021` here), even though it is still slightly worse than pure FP32 because the value `0.01` has already been quantized once when it is first represented in FP16. This illustrates why mixed-precision training usually keeps reductions and accumulations in higher precision even when some inputs or matmuls use lower precision.
 
 ### 1.1.5(a) Dtypes Under Autocast
-**Question:** For the toy model under FP16 autocast, what are the data types of:
+**Question:** Consider the following model. Suppose we are training the model on a GPU and that the model parameters are originally in FP32. We'd like to use autocasting mixed precision with FP16. What are the data types of:
 
 ```python
 class ToyModel(nn.Module):
@@ -117,7 +121,7 @@ class ToyModel(nn.Module):
 - the loss,
 - and the model's gradients?
 
-**Deliverable:** The data types for each of the listed components.
+**Deliverable:** The data types for each of the components listed above.
 
 **Answer:** In our CUDA autocast check, the model parameters remain `float32`, the output of the first feed-forward layer (`fc1`) is `float16`, the output of layer norm is `float32`, the model logits are `float16`, the loss is `float32`, and the gradients are `float32`. This matches the intended mixed-precision pattern: linear layers run in lower precision where possible, while numerically sensitive normalization, loss computation, and stored parameter/gradient state stay in FP32.
 
@@ -129,7 +133,7 @@ class ToyModel(nn.Module):
 **Answer:** The numerically sensitive parts of layer normalization are the mean/variance reductions, the accumulation of squared values, and the normalization step itself (subtracting the mean and dividing by the standard deviation), because these operations can amplify rounding error and are more vulnerable to overflow or underflow in low precision. With FP16, this makes it important to keep LayerNorm in higher precision. BF16 is much more stable because it has the same exponent range as FP32, so the overflow/underflow problem is much less severe, but its mantissa is still shorter than FP32, so treating LayerNorm more carefully can still improve numerical robustness.
 
 ### 1.1.5(c) BF16 Benchmarking
-**Question:** Modify the benchmarking script to optionally run with BF16 mixed precision. Time the forward and backward passes with and without mixed precision for each language model size in Section 1.1.2. Compare the results and comment on any trends as model size changes.
+**Question:** Modify your benchmarking script to optionally run the model using mixed precision with BF16. Time the forward and backward passes with and without mixed-precision for each language model size described in §1.1.2. Compare the results of using full vs. mixed precision, and comment on any trends as model size changes. You may find the `nullcontext` no-op context manager to be useful.
 
 **Deliverable:** A 2-3 sentence response with timings and commentary.
 
@@ -140,9 +144,9 @@ class ToyModel(nn.Module):
 ## Problem `memory_profiling`: Memory Profiling (4 points)
 
 ### (a)
-**Question:** Run the memory profiler on the 2.7B model for inference-only and for a full training step. How do the active memory timelines look? Can you tell which stage is running based on the peaks?
+**Question:** Add an option to your profiling script to run your model through the memory profiler. It may be helpful to reuse some of your previous infrastructure (e.g., to activate mixed-precision, load specific model sizes, etc). Then, run your script to get a memory profile of the 2.7B model when either doing inference only (just forward pass) or a full training step. How do your memory timelines look like? Can you tell which stage is running based on the peaks you see?
 
-**Deliverable:** Two images of the active memory timeline of a 2.7B model, one for the forward pass and one for a full training step, plus a 2-3 sentence response.
+**Deliverable:** Two images of the "Active memory timeline" of a 2.7B model, from the memory_viz tool: one for the forward pass, and one for running a full training step (forward and backward passes, then optimizer step), and a 2-3 sentence response.
 
 **Answer:**
 
@@ -174,21 +178,21 @@ The forward-only active-memory timeline is not completely flat: it shows a rough
 Forward-only peak memory grows with context length but only moderately, whereas the full training step uses much more memory overall and shows a much larger increase by context length 512. This is consistent with training needing to retain saved activations, gradients, and optimizer-related state in addition to the forward-pass allocations.
 
 ### (c)
-**Question:** Find the peak memory usage of the 2.7B model when using mixed precision, for both a forward pass and a full optimizer step. Does mixed precision significantly affect memory usage?
+**Question:** Find the peak memory usage of the 2.7B model when using mixed-precision, for both a forward pass and a full optimizer step. Does mixed-precision significantly affect memory usage?
 
 **Deliverable:** A 2-3 sentence response.
 
 **Answer:** In this setup, BF16 does not significantly reduce measured peak memory overall. For forward-only runs, the measured peak memory is actually higher under BF16 at all three tested context lengths (`12.93 -> 19.16 GiB`, `13.02 -> 19.18 GiB`, and `13.45 -> 19.41 GiB` for context lengths `128`, `256`, and `512` respectively), while for full training steps it is nearly unchanged at shorter contexts (`51.44 -> 51.44 GiB` at `128`, `51.44 -> 52.11 GiB` at `256`) and only modestly lower at `512` (`65.52 -> 62.69 GiB`). A plausible explanation is that BF16 autocast changes the execution path rather than simply shrinking every tensor: parameters and optimizer state still remain in FP32, while extra cast/workspace buffers can be introduced during lower-precision execution, so the net peak-memory effect is small and can even be negative for forward-only runs.
 
 ### (d)
-**Question:** Consider the 2.7B model. At our reference hyperparameters, what is the size of a tensor of activations in the Transformer residual stream, in single precision? Give this size in MB.
+**Question:** Consider the 2.7B model. At our reference hyperparameters, what is the size of a tensor of activations in the Transformer residual stream, in single-precision? Give this size in MB (i.e., divide the number of bytes by 1024^2).
 
 **Deliverable:** A 1-2 sentence response with your derivation.
 
 **Answer:** For the 2.7B model, the residual-stream activation tensor at the reference hyperparameters has shape `(batch_size, context_length, d_model) = (4, 128, 2560)`, so it contains `4 * 128 * 2560 = 1,310,720` elements. In single precision this is `1,310,720 * 4 = 5,242,880` bytes, which is exactly `5.00 MiB` after dividing by `1024^2`.
 
 ### (e)
-**Question:** Now look closely at the “Active Memory Timeline” from pytorch.org/memory_viz of a memory snapshot of the 2.7B model doing a forward pass. When you reduce the “Detail” level, the tool hides the smallest allocations to the corresponding level. What is the size of the largest allocations shown? Looking through the stack trace, can you tell where those allocations come from?
+**Question:** Now look closely at the "Active Memory Timeline" from pytorch.org/memory_viz of a memory snapshot of the 2.7B model doing a forward pass. When you reduce the "Detail" level, the tool hides the smallest allocations to the corresponding level (e.g., putting "Detail" at 10% only shows the 10% largest allocations). What is the size of the largest allocations shown? Looking through the stack trace, can you tell where those allocations come from?
 
 **Deliverable:** A 1-2 sentence response.
 
@@ -199,9 +203,18 @@ Forward-only peak memory grows with context length but only moderately, whereas 
 ## Problem `pytorch_attention`: Benchmarking PyTorch Attention (2 points)
 
 ### (a)
-**Question:** Report the timings or out-of-memory errors for the requested attention configurations. At what size do you get out-of-memory errors? Do the memory accounting for one of the smallest configurations that runs out of memory. How does the memory saved for backward change with sequence length? What would you do to eliminate this memory cost?
+**Question:** Benchmark your attention implementation at different scales. Write a script that will:
 
-**Deliverable:** A table with timings, your memory-usage working, and a 1-2 paragraph response.
+- Fix the batch size to 8 and don't use multihead attention (i.e. remove the head dimension).
+- Iterate through the cartesian product of `[16, 32, 64, 128]` for the head embedding dimension `d_model`, and `[256, 1024, 4096, 8192, 16384]` for the sequence length.
+- Create random inputs `Q`, `K`, `V` for the appropriate size.
+- Time 100 forward passes through attention using the inputs.
+- Measure how much memory is in use before the backward pass starts, and time 100 backward passes.
+- Make sure to warm up, and to call `torch.cuda.synchronize()` after each forward/backward pass.
+
+Report the timings (or out-of-memory errors) you get for these configurations. At what size do you get out-of-memory errors? Do the accounting for the memory usage of attention in one of the smallest configurations you find that runs out of memory (you can use the equations for memory usage of Transformers from Assignment 1). How does the memory saved for backward change with the sequence length? What would you do to eliminate this memory cost?
+
+**Deliverable:** A table with your timings, your working out for the memory usage, and a 1-2 paragraph response.
 
 **Answer:**
 
@@ -243,9 +256,9 @@ The timing results show the same high-level pattern. Both forward and backward l
 ## Problem `torch_compile`: Benchmarking JIT-Compiled Attention (2 points)
 
 ### (a)
-**Question:** Compare a compiled version of the PyTorch attention implementation against the uncompiled version under the same configuration as the previous attention benchmark.
+**Question:** Extend your attention benchmarking script to include a compiled version of your PyTorch implementation of attention, and compare its performance to the uncompiled version with the same configuration as the `pytorch_attention` problem above.
 
-**Deliverable:** A table comparing forward and backward timings for the compiled attention module with the uncompiled version.
+**Deliverable:** A table comparing your forward and backward pass timings for your compiled attention module with the uncompiled version from the `pytorch_attention` problem above.
 
 **Answer:**
 
@@ -277,7 +290,7 @@ The timing results show the same high-level pattern. Both forward and backward l
 The gains are smaller at larger `d_model`. Averaging across sequence lengths, the forward speedup decreases from about `1.92x` at `d_model=16` to about `1.39x` at `d_model=128`, and the backward speedup decreases similarly from about `1.79x` to about `1.41x`. A plausible explanation is that as `d_model` increases, matrix multiplications take a larger fraction of the runtime, leaving less relative overhead for `torch.compile` to eliminate. This also explains why very small workloads can see little benefit or even a slight slowdown, such as the `d_model=64`, `T=256` case.
 
 ### (b)
-**Question:** Compile the entire Transformer model in the end-to-end benchmarking script. How does the performance of the forward pass change? What about the combined forward and backward passes and optimizer steps?
+**Question:** Now, compile your entire Transformer model in your end-to-end benchmarking script. How does the performance of the forward pass change? What about the combined forward and backward passes and optimizer steps?
 
 **Deliverable:** A table comparing the vanilla and compiled Transformer model.
 
@@ -300,9 +313,11 @@ The train-step speedup is smaller across the board and becomes quite limited for
 ## Problem `flash_benchmarking`: FlashAttention-2 Benchmarking (5 points)
 
 ### (a)
-**Question:** Compare your FlashAttention-2 implementation against the PyTorch implementation using the requested settings, and report forward, backward, and end-to-end latencies.
+**Question:** Write a benchmarking script using `triton.testing.do_bench` that compares the performance of your (partially) Triton implementation of FlashAttention-2 forward and backward passes with a regular PyTorch implementation (i.e., not using FlashAttention).
 
-**Deliverable:** A table of results comparing your FlashAttention-2 implementation with the PyTorch implementation, reporting forward, backward, and end-to-end latencies.
+Specifically, you will report a table that includes latencies for forward, backward, and the end-to-end forward-backward pass, for both your Triton and PyTorch implementations. Randomly generate any necessary inputs before you start benchmarking, and run the benchmark on a single H100. Always use batch size 1 and causal masking. Sweep over the cartesian product of sequence lengths of various powers of 2 from 128 up to 65536, embedding dimension sizes of various powers of 2 from 16 up to size 128, and precisions of `torch.bfloat16` and `torch.float32`. You will likely need to adjust tile sizes depending on the input sizes.
+
+**Deliverable:** A table of results comparing your implementation of FlashAttention-2 with the PyTorch implementation, using the settings above and reporting forward, backward, and end-to-end latencies.
 
 **Answer:** We benchmarked the requested sweep on a single NVIDIA H800 with batch size `1`, causal masking enabled, and fixed `q_tile_size = k_tile_size = 16`. The results show that the current FlashAttention implementation is consistently strong in FP32, especially at longer sequence lengths, and it remains runnable in the `seq_len = 65536`, FP32 cases where the regular PyTorch attention implementation runs out of memory. The forward-only results are always favorable to FlashAttention, with the largest gains at very short and very long sequence lengths. The main performance limitation is now the backward pass: our implementation uses a Triton forward kernel, but its backward pass is still a PyTorch recomputation routine wrapped with `torch.compile`. This design reduces activation storage because it does not save the full attention matrix, but it does not yet provide the full IO savings of a fused FlashAttention backward kernel. As a result, it pays extra recomputation cost while still performing substantial large-tensor read/write traffic during backward, which is why the end-to-end gains are much smaller than the forward-only gains and can even reverse in BF16 at larger `d` and longer sequence lengths. The full archived table is in `artifacts/experiments/ch1/1_3_2/summary.md`.
 
@@ -402,9 +417,15 @@ Using the current default best-config JSON, our final handout-style leaderboard 
 ## Problem `distributed_communication_single_node`: Distributed Communication on a Single Node (5 points)
 
 ### (a)
-**Question:** Benchmark all-reduce runtime in the single-node multi-process setup while varying backend and device type, data size, and number of processes.
+**Question:** Write a script to benchmark the runtime of the all-reduce operation in the single-node multi-process setup. The example code above may provide a reasonable starting point. Experiment with varying the following settings:
 
-**Deliverable:** Plots and/or tables comparing the various settings, with 2-3 sentences of commentary about the results and how the factors interact.
+- Backend + device type: Gloo + CPU, NCCL + GPU.
+- All-reduce data size: float32 data tensors ranging over 1MB, 10MB, 100MB, 1GB.
+- Number of processes: 2, 4, or 6 processes.
+
+Resource requirements: Up to 6 GPUs. Each benchmarking run should take less than 5 minutes.
+
+**Deliverable:** Plot(s) and/or table(s) comparing the various settings, with 2-3 sentences of commentary about your results and thoughts about how the various factors interact.
 
 **Answer:**
 
@@ -433,9 +454,9 @@ The dominant trend is that `NCCL + GPU` is consistently much faster than `Gloo +
 ## Problem `naive_ddp_benchmarking`: Naive DDP Benchmarking (3 points)
 
 ### (a)
-**Question:** Benchmark the language model trained with the naive DDP implementation. Measure total time per training step and the proportion of time spent communicating gradients in the single-node, 2-GPU, XL setup.
+**Question:** In this naive DDP implementation, parameters are individually all-reduced across ranks after each backward pass. To better understand the overhead of data parallel training, create a script to benchmark your previously-implemented language model when trained with this naive implementation of DDP. Measure the total time per training step and the proportion of time spent on communicating gradients. Collect measurements in the single-node setting (1 node x 2 GPUs) for the XL model size described in §1.1.2.
 
-**Deliverable:** A description of the benchmarking setup, along with the measured time per training step and the proportion of time spent communicating gradients.
+**Deliverable:** A description of your benchmarking setup, along with the measured time per training step and the proportion of time spent communicating gradients.
 
 **Answer:**
 
@@ -464,9 +485,9 @@ The Nsight Systems trace is also consistent with this timing breakdown: in the m
 ## Problem `minimal_ddp_flat_benchmarking`: Reducing the Number of Communication Calls (2 points)
 
 ### (a)
-**Question:** Communicate a single flattened gradient tensor instead of issuing one all-reduce per parameter tensor. Compare the performance to the minimal DDP implementation that individually communicates gradients.
+**Question:** Modify your minimal DDP implementation to communicate a tensor with flattened gradients from all parameters. Compare its performance with the minimal DDP implementation that issues an all-reduce for each parameter tensor under the previously-used conditions (1 node x 2 GPUs, XL model size as described in §1.1.2).
 
-**Deliverable:** The measured time per training iteration and time spent communicating gradients, plus 1-2 sentences comparing batching versus individual communication.
+**Deliverable:** The measured time per training iteration and time spent communicating gradients under distributed data parallel training with a single batched all-reduce call. 1-2 sentences comparing the results when batching vs. individually communicating gradients.
 
 **Answer:**
 
@@ -501,9 +522,9 @@ Flattened all-reduce CUDA HW trace:
 ## Problem `ddp_overlap_individual_parameters_benchmarking`: Overlapping Computation with Communication of Individual Parameter Gradients (1 point)
 
 ### (a)
-**Question:** Benchmark the DDP implementation that overlaps backward computation with communication of individual parameter gradients. Compare it against the earlier DDP baselines in the single-node, 2-GPU, XL setup.
+**Question:** Benchmark the performance of your DDP implementation when overlapping backward pass computation with communication of individual parameter gradients. Compare its performance with our previously-studied settings (the minimal DDP implementation that either issues an all-reduce for each parameter tensor, or a single all-reduce on the concatenation of all parameter tensors) with the same setup: 1 node, 2 GPUs, and the XL model size described in §1.1.2.
 
-**Deliverable:** The measured time per training iteration, with 1-2 sentences comparing the results.
+**Deliverable:** The measured time per training iteration when overlapping the backward pass with communication of individual parameter gradients, with 1-2 sentences comparing the results.
 
 **Answer:**
 
@@ -524,9 +545,9 @@ Comparison:
 Overlapping per-parameter gradient communication with backward computation reduced the total training-step time to `420.660 ms`, compared with `445.923 ms` for the naive baseline and `446.389 ms` for the flattened baseline. The post-backward communication tail dropped sharply to `6.027 ms` from about `40 ms` in the earlier baselines, which indicates that most communication was successfully hidden under the backward pass rather than paid entirely at the end of the step.
 
 ### (b)
-**Question:** Use Nsight to compare the initial DDP implementation with the overlapped implementation, and visually demonstrate whether communication overlaps with the backward pass.
+**Question:** Instrument your benchmarking code (using the 1 node, 2 GPUs, XL model size setup) with the Nsight profiler, comparing between the initial DDP implementation and this DDP implementation that overlaps backward computation and communication. Visually compare the two traces, and provide a profiler screenshot demonstrating that one implementation overlaps compute with communication while the other doesn't.
 
-**Deliverable:** Two screenshots, one from each implementation, that visually show whether communication overlaps with the backward pass.
+**Deliverable:** 2 screenshots (one from the initial DDP implementation, and another from this DDP implementation that overlaps compute with communication) that visually show that communication is or isn't overlapped with the backward pass.
 
 **Answer:**
 
@@ -545,9 +566,9 @@ Overlapped DDP trace:
 ## Problem `ddp_bucketed_benchmarking`: Overlapping Computation with Communication of Bucketed Parameter Gradients (3 points)
 
 ### (a)
-**Question:** Benchmark bucketed DDP for bucket sizes of 1, 10, 100, and 1000 MB in the single-node, 2-GPU, XL setup. Compare against the non-bucketed baselines. Do the results align with your expectations? If not, why not? What changes in the experimental setup would you expect to make the results align better with your expectations?
+**Question:** Benchmark your bucketed DDP implementation using the same config as the previous experiments (1 node, 2 GPUs, XL model size), varying the maximum bucket size (1, 10, 100, 1000 MB). Compare your results to the previous experiments without bucketing--do the results align with your expectations? If they don't align, why not? You may have to use the PyTorch profiler as necessary to better understand how communication calls are ordered and/or executed. What changes in the experimental setup would you expect to yield results that are aligned with your expectations?
 
-**Deliverable:** Measured time per training iteration for various bucket sizes, plus 3-4 sentences of commentary.
+**Deliverable:** Measured time per training iteration for various bucket sizes. 3-4 sentence commentary about the results, your expectations, and potential reasons for any mismatch.
 
 **Answer:**
 
@@ -583,9 +604,9 @@ The profiler traces support the same interpretation. For small buckets (`1 MB` a
 ![1000 MB bucket trace](artifacts/experiments/ch2/2_3_3_bucketed_ddp/1000mb.png)
 
 ### (b)
-**Question:** Assume that the time to compute gradients for a bucket equals the time to communicate that bucket. Write an equation for DDP communication overhead as a function of total model size `s`, all-reduce bandwidth `w`, per-call overhead `o`, and number of buckets `n_b`. Then write the equation for the optimal bucket size.
+**Question:** Assume that the time it takes to compute the gradients for a bucket is identical to the time it takes to communicate the gradient buckets. Write an equation that models the communication overhead of DDP (i.e., the amount of additional time spent after the backward pass) as a function of the total size (bytes) of the model parameters (`s`), the all-reduce algorithm bandwidth (`w`, computed as the size of each rank's data divided by the time it takes to finish the all-reduce), the overhead (seconds) associated with each communication call (`o`), and the number of buckets (`n_b`). From this equation, write an equation for the optimal bucket size that minimizes DDP overhead.
 
-**Deliverable:** An equation that models DDP overhead, and an equation for the optimal bucket size.
+**Deliverable:** Equation that models DDP overhead, and an equation for the optimal bucket size.
 
 **Answer:** Let each bucket contain `s / n_b` bytes of gradients. Under the stated assumption, the time to compute one bucket of gradients equals the payload communication time for one bucket, so the payload communication time per bucket is `s / (n_b * w)`. In the ideal overlapped pipeline, the payload portion of most communication calls is hidden under the computation of later buckets, but two kinds of overhead remain visible after backward: the payload communication time of the final bucket, which has no later computation to hide behind, and the fixed launch overhead `o` for each of the `n_b` communication calls. Therefore a simple model for the post-backward DDP overhead is:
 
@@ -616,30 +637,32 @@ b* = s / n_b* = sqrt(s * w * o)
 ## Problem `communication_accounting`: 4D Parallelism (10 points)
 
 ### (a)
-**Question:** For the XXL model, how much memory is required to store the master weights, accumulated gradients, and optimizer states in FP32 on a single device? How much memory is saved for backward in BF16? How many H100 80GB GPUs worth of memory is this?
+**Question:** Consider a new model config, XXL, with `d_model=16384`, `d_ff=53248`, and `num_blocks=126`. Because for very large models, the vast majority of FLOPs are in the feedforward networks, we make some simplifying assumptions. First, we omit attention, input embeddings, and output linear layers. Then, we assume that each FFN is simply two linear layers (ignoring the activation function), where the first has input size `d_model` and output size `d_ff`, and the second has input size `d_ff` and output size `d_model`. Your model consists of `num_blocks` blocks of these two linear layers. Don't do any activation checkpointing, and keep your activations and gradient communications in BF16, while your accumulated gradients, master weights and optimizer state should be in FP32.
+
+How much memory would it take to store the master model weights, accumulated gradients and optimizer states in FP32 on a single device? How much memory is saved for backward (these will be in BF16)? How many H100 80GB GPUs worth of memory is this?
 
 **Deliverable:** Your calculations and a one-sentence response.
 
 **Answer:** In the simplified FFN-only XXL model, each block has `2 * d_model * d_ff = 1,744,830,464` parameters, so the full model has `219,848,638,464` parameters. Storing the master weights and accumulated gradients in FP32 requires `819.0 GiB` each, while Adam optimizer state requires `1638.0 GiB`, for a total of `3276.0 GiB` of FP32 model state; this is a lower bound of about `43.97` H100 80GB GPUs even before counting saved activations. Since attention is omitted, the saved-for-backward activations are no longer quadratic in sequence length, but they still scale with token count: in this FFN-only model they contribute `num_blocks * B * T * (d_model + d_ff) * 2 = 17,547,264 * B * T bytes`, so the total training-memory requirement is `3,517,578,215,424 + 17,547,264 * B * T bytes`, corresponding to `ceil((3,517,578,215,424 + 17,547,264 * B * T) / (80 * 10^9))` H100 80GB GPUs. For three typical values using the assignment-wide default `B = 4`, the required H100 counts are about `44.08` (`T = 128`), `44.19` (`T = 256`), and `44.42` (`T = 512`). The full derivation is archived in [question_a_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_a_summary.md).
 
 ### (b)
-**Question:** Assume master weights, optimizer state, gradients, and half of the activations are sharded across `N_FSDP` devices. Write an expression for the memory per device. What value of `N_FSDP` is needed for the total memory cost to be less than one v5p TPU device (95 GB per device)?
+**Question:** Now assume your master weights, optimizer state, gradients and half of your activations (in practice every second layer) are sharded across `N_FSDP` devices. Write an expression for how much memory this would take per device. What value does `N_FSDP` need to be for the total memory cost to be less than 1 v5p TPU (95GB per device)?
 
 **Deliverable:** Your calculations and a one-sentence response.
 
 **Answer:** Let `W`, `G`, `O`, and `A` denote the memory for master weights, accumulated gradients, optimizer states, and saved activations respectively. Since the problem states that `W`, `G`, `O`, and half of the activations are sharded across `N_FSDP` devices, the per-device memory is `M(N_FSDP) = (W + G + O + 0.5A) / N_FSDP + 0.5A`. Using part (a), this becomes `(3,517,578,215,424 + 0.5 * (17,547,264 * B * T)) / N_FSDP + 0.5 * (17,547,264 * B * T)` bytes per device. Requiring this to be below `95 * 10^9` bytes gives `N_FSDP > (3,517,578,215,424 + 0.5 * (17,547,264 * B * T)) / (95 * 10^9 - 0.5 * (17,547,264 * B * T))`, so the minimum valid choice is the ceiling of that expression. For three typical values using `B = 4`, the minimum values are `39` (`T = 128`), `41` (`T = 256`), and `46` (`T = 512`). The full derivation is archived in [question_b_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_b_summary.md).
 
 ### (c)
-**Question:** Consider only the forward pass. Using the provided TPU v5p bandwidth and FLOP rate, with `M_X = 2`, `M_Y = 1`, `X = 16`, and `Y = 4`, at what per-device batch size is the model compute bound? What is the overall batch size in this setting?
+**Question:** Consider only the forward pass. Use the communication bandwidth of `W_ici = 2 * 9 * 10^10` and FLOPS/s of `C = 4.6 * 10^14` for TPU v5p as given in the TPU Scaling Book. Following the notation of the Scaling Book, use `M_X = 2`, `M_Y = 1` (a 3D mesh), with `X = 16` being your FSDP dimension, and `Y = 4` being your TP dimension. At what per-device batch size is this model compute bound? What is the overall batch size in this setting?
 
 **Deliverable:** Your calculations and a one-sentence response.
 
 **Answer:** Following the mixed FSDP + TP forward-pass model from the Scaling Book, we compare `T_math = 4 * B * D * F / (N * C)` against `T_comms = max(T_FSDP, T_TP)`, where `T_FSDP = 4 * D * F / (Y * W_ici * M_X)` and `T_TP = 4 * B * D / (X * W_ici * M_Y)`. Writing `b = B / N` for the per-device token batch size and using `C = 4.6 * 10^14`, `W_ici = 2 * 9 * 10^10`, `Y = 4`, and `M_X = 2`, the FSDP-side compute-bound threshold is `b >= C / (Y * W_ici * M_X) = 2555.56 / (4 * 2) = 319.44` tokens per device, so the minimum integer per-device batch is `320` tokens. With `N = X * Y = 64`, the corresponding overall token batch threshold is `319.44 * 64 = 20,444.44`, so the minimum integer overall batch is `20,480` tokens. The TP-side condition `F >= (C / W_ici) * (Y / M_Y)` is also satisfied because `53,248 > 10,222.22`, so the FSDP communication term is the limiting factor. The full derivation is archived in [question_c_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_c_summary.md).
 
 ### (d)
-**Question:** In practice, we want the overall batch size to be as small as possible while staying compute efficient instead of communication bound. What tricks can we use to reduce the batch size while retaining high throughput?
+**Question:** In practice, we want the overall batch size to be as small as possible, and we also always use our compute effectively (in other words we want to never be communication bound). What other tricks can we employ to reduce the batch size of our model but retain high throughput?
 
-**Deliverable:** A one-paragraph response backed up with references and/or equations.
+**Deliverable:** A one-paragraph response. Back up your claims with references and/or equations.
 
 **Answer:** Part (c) already assumes an idealized overlap model, so the cleanest ways to reduce the batch size needed for high throughput are the ones that directly improve the communication terms rather than simply "adding more overlap." One option is to increase the effective communication bandwidth, i.e. to improve `M_X` and `M_Y` through a better topology / placement so that the collective terms shrink. A second option is to rebalance the hybrid parallelism by changing `X` and `Y`, so that neither the FSDP nor the TP communication term dominates the other. A third option is to reduce the communication volume itself, for example with lower-precision communication or more communication-efficient collectives, which shifts the compute/communication crossover to a smaller batch. Finally, gradient accumulation is a practical engineering workaround: it does change training dynamics by increasing the effective batch per optimizer step, but it lets us keep the instantaneous microbatch small enough to fit memory while amortizing synchronization overhead across more local work. A longer summary of these tradeoffs is archived in [question_d_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_d_summary.md).
 
@@ -648,22 +671,22 @@ b* = s / n_b* = sqrt(s * w * o)
 ## Problem `optimizer_state_sharding_accounting`: Optimizer State Sharding (5 points)
 
 ### (a)
-**Question:** Using the standard configuration (1 node, 2 GPUs, XL model size), report the peak memory usage after model initialization, directly before the optimizer step, and directly after the optimizer step, both with and without optimizer state sharding. Do the results align with your expectations? Break down the memory usage in each setting.
+**Question:** Create a script to profile the peak memory usage when training language models with and without optimizer state sharding. Using the standard configuration (1 node, 2 GPUs, XL model size), report the peak memory usage after model initialization, directly before the optimizer step, and directly after the optimizer step. Do the results align with your expectations? Break down the memory usage in each setting (e.g., how much memory for parameters, how much for optimizer states, etc.).
 
-**Deliverable:** A 2-3 sentence response with peak memory usage results and a breakdown of the memory division across model and optimizer components.
+**Deliverable:** 2-3 sentence response with peak memory usage results and a breakdown of how the memory is divided between different model and optimizer components.
 
 **Answer:** On the standard 1-node, 2-GPU, XL setup, both the full and sharded optimizers peak at about `7.62 GiB` per GPU after model initialization and about `15.26 GiB` per GPU immediately before `optimizer.step()`, which matches the theoretical `4P` and `8P` scaling for `P = 1,998,235,200` FP32 parameters. After the first optimizer step, the full optimizer reaches about `30.49 GiB` per GPU, while the sharded optimizer reaches about `22.75 GiB` on rank 1 and `22.99 GiB` on rank 0, close to the theoretical `16P = 29.78 GiB` and `(8 + 8 / N)P = 22.33 GiB` expectations for `N = 2`. The breakdown is consistent with the implementation: parameters contribute about `7.44 GiB`, gradients another `7.44 GiB`, and Adam state drops from about `14.89 GiB` in the full optimizer to about `7.33-7.56 GiB` per rank in the sharded version, with the remaining gap explained by activations, temporary buffers, and allocator overhead.
 
 ### (b)
-**Question:** How does optimizer state sharding affect training speed? Measure the time per iteration with and without optimizer state sharding in the standard configuration.
+**Question:** How does our implementation of optimizer state sharding affect training speed? Measure the time taken per iteration with and without optimizer state sharding for the standard configuration (1 node, 2 GPUs, XL model size).
 
-**Deliverable:** A 2-3 sentence response with your timings.
+**Deliverable:** 2-3 sentence response with your timings.
 
 **Answer:** Optimizer state sharding leaves the forward-plus-backward portion essentially unchanged in this setup (`355.36 ms` without sharding versus `356.01 ms` with sharding), but it reduces optimizer-step time from `92.31 ms` to `79.14 ms`. As a result, the mean iteration time drops from `447.67 ms` to `435.15 ms`, which is a modest `1.03x` speedup (about `2.8%`). The most likely reason is that each rank now updates and maintains only about half of the Adam state, so the local optimizer step becomes cheaper and the extra post-step parameter broadcasts do not outweigh that savings at `world_size = 2`.
 
 ### (c)
-**Question:** How does this optimizer-state-sharding approach differ from ZeRO stage 1 as described in Rajbhandari et al. (2020), especially with respect to memory and communication volume?
+**Question:** How does our approach to optimizer state sharding differ from ZeRO stage 1 (described as ZeRO-DP `P_os` in Rajbhandari et al., 2020)?
 
-**Deliverable:** A 2-3 sentence summary of the differences.
+**Deliverable:** 2-3 sentence summary of any differences, especially those related to memory and communication volume.
 
 **Answer:** Our implementation matches the core idea of ZeRO stage 1 (`P_os`): optimizer states are partitioned across data-parallel ranks, while parameters and gradients remain replicated, so each rank stores only about `1 / N` of the optimizer state. The main difference is that ours is a simplified teaching implementation: it keeps full gradients resident until `step()` and then explicitly broadcasts the updated parameter shards back to all ranks, whereas ZeRO stage 1 is described as part of a broader partition-aware communication schedule designed to keep communication volume close to standard data parallel training. In addition, Rajbhandari et al. analyze mixed-precision Adam, where the optimizer state also includes FP32 master parameters, while our experiments use the course FP32 AdamW implementation, so the exact memory formulas differ even though the source of the savings is the same.
