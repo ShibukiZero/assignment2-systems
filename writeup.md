@@ -189,14 +189,38 @@ Forward-only peak memory grows with context length but only moderately, whereas 
 
 **Deliverable:** A 1-2 sentence response with your derivation.
 
-**Answer:** For the 2.7B model, the residual-stream activation tensor at the reference hyperparameters has shape `(batch_size, context_length, d_model) = (4, 128, 2560)`, so it contains `4 * 128 * 2560 = 1,310,720` elements. In single precision this is `1,310,720 * 4 = 5,242,880` bytes, which is exactly `5.00 MiB` after dividing by `1024^2`.
+**Answer:** For the 2.7B model, the residual-stream activation tensor at the reference hyperparameters has shape
+
+$$
+(\text{batch\_size}, \text{context\_length}, d_{\text{model}}) = (4, 128, 2560),
+$$
+
+so it contains
+
+$$
+4 \cdot 128 \cdot 2560 = 1{,}310{,}720
+$$
+
+elements. In single precision this is
+
+$$
+1{,}310{,}720 \cdot 4 = 5{,}242{,}880 \text{ bytes} = 5.00 \text{ MiB},
+$$
+
+after dividing by $1024^2$.
 
 ### (e)
 **Question:** Now look closely at the "Active Memory Timeline" from pytorch.org/memory_viz of a memory snapshot of the 2.7B model doing a forward pass. When you reduce the "Detail" level, the tool hides the smallest allocations to the corresponding level (e.g., putting "Detail" at 10% only shows the 10% largest allocations). What is the size of the largest allocations shown? Looking through the stack trace, can you tell where those allocations come from?
 
 **Deliverable:** A 1-2 sentence response.
 
-**Answer:** The largest allocations visible in the forward-pass memory snapshot are about `128 MiB` each. Their stack traces point to the `softmax` call inside `scaled_dot_product_attention`, which matches the size of an explicitly materialized attention score/weight tensor of shape `(batch, heads, seq_len, seq_len)` for the `2.7b` model at `batch=4`, `heads=32`, and `seq_len=512` (`4 * 32 * 512 * 512 * 4 bytes = 128 MiB`), so these allocations come from the naive self-attention implementation rather than the residual-stream activations.
+**Answer:** The largest allocations visible in the forward-pass memory snapshot are about `128 MiB` each. Their stack traces point to the `softmax` call inside `scaled_dot_product_attention`, which matches the size of an explicitly materialized attention score/weight tensor of shape $(\text{batch}, \text{heads}, \text{seq\_len}, \text{seq\_len})$ for the `2.7b` model at `batch=4`, `heads=32`, and `seq_len=512`:
+
+$$
+4 \cdot 32 \cdot 512 \cdot 512 \cdot 4 \text{ bytes} = 128 \text{ MiB}.
+$$
+
+So these allocations come from the naive self-attention implementation rather than the residual-stream activations.
 
 ---
 
@@ -243,7 +267,19 @@ Report the timings (or out-of-memory errors) you get for these configurations. A
 
 Memory accounting:
 
-For a single FP32 attention intermediate of shape `(B, T, T)`, the memory cost is `B * T * T * 4` bytes. However, the measured memory saved for backward is closer to about twice that amount, because by the end of the forward pass the naive implementation appears to keep roughly two large `B x T x T` FP32 intermediates alive, corresponding naturally to the pre-softmax attention scores and the post-softmax attention weights. For example, with `B=8` and `T=16384`, one such tensor would require `8 * 16384 * 16384 * 4 = 8 GiB`, while the measured saved-for-backward memory is about `16 GiB`, consistent with storing about two such tensors rather than just one.
+For a single FP32 attention intermediate of shape $(B, T, T)$, the memory cost is
+
+$$
+B \cdot T \cdot T \cdot 4 \text{ bytes}.
+$$
+
+However, the measured memory saved for backward is closer to about twice that amount, because by the end of the forward pass the naive implementation appears to keep roughly two large $B \times T \times T$ FP32 intermediates alive, corresponding naturally to the pre-softmax attention scores and the post-softmax attention weights. For example, with $B = 8$ and $T = 16384$, one such tensor would require
+
+$$
+8 \cdot 16384 \cdot 16384 \cdot 4 = 8 \text{ GiB},
+$$
+
+while the measured saved-for-backward memory is about `16 GiB`, consistent with storing about two such tensors rather than just one.
 
 Response:
 
@@ -610,27 +646,27 @@ The profiler traces support the same interpretation. For small buckets (`1 MB` a
 
 **Answer:** Let each bucket contain `s / n_b` bytes of gradients. Under the stated assumption, the time to compute one bucket of gradients equals the payload communication time for one bucket, so the payload communication time per bucket is `s / (n_b * w)`. In the ideal overlapped pipeline, the payload portion of most communication calls is hidden under the computation of later buckets, but two kinds of overhead remain visible after backward: the payload communication time of the final bucket, which has no later computation to hide behind, and the fixed launch overhead `o` for each of the `n_b` communication calls. Therefore a simple model for the post-backward DDP overhead is:
 
-```text
-T_overhead(n_b) = s / (n_b * w) + n_b * o
-```
+$$
+T_{\text{overhead}}(n_b) = \frac{s}{n_b w} + n_b o.
+$$
 
 To minimize this expression, differentiate with respect to `n_b` and set the derivative to zero:
 
-```text
-dT_overhead / dn_b = -s / (w * n_b^2) + o = 0
-```
+$$
+\frac{d T_{\text{overhead}}}{d n_b} = -\frac{s}{w n_b^2} + o = 0.
+$$
 
 which gives:
 
-```text
-n_b* = sqrt(s / (w * o))
-```
+$$
+n_b^* = \sqrt{\frac{s}{w o}}.
+$$
 
 Since the bucket size is `b = s / n_b`, the corresponding optimal bucket size is:
 
-```text
-b* = s / n_b* = sqrt(s * w * o)
-```
+$$
+b^* = \frac{s}{n_b^*} = \sqrt{s w o}.
+$$
 
 ---
 
@@ -643,21 +679,101 @@ How much memory would it take to store the master model weights, accumulated gra
 
 **Deliverable:** Your calculations and a one-sentence response.
 
-**Answer:** In the simplified FFN-only XXL model, each block has `2 * d_model * d_ff = 1,744,830,464` parameters, so the full model has `219,848,638,464` parameters. Storing the master weights and accumulated gradients in FP32 requires `819.0 GiB` each, while Adam optimizer state requires `1638.0 GiB`, for a total of `3276.0 GiB` of FP32 model state; this is a lower bound of about `43.97` H100 80GB GPUs even before counting saved activations. Since attention is omitted, the saved-for-backward activations are no longer quadratic in sequence length, but they still scale with token count: in this FFN-only model they contribute `num_blocks * B * T * (d_model + d_ff) * 2 = 17,547,264 * B * T bytes`, so the total training-memory requirement is `3,517,578,215,424 + 17,547,264 * B * T bytes`, corresponding to `ceil((3,517,578,215,424 + 17,547,264 * B * T) / (80 * 10^9))` H100 80GB GPUs. For three typical values using the assignment-wide default `B = 4`, the required H100 counts are about `44.08` (`T = 128`), `44.19` (`T = 256`), and `44.42` (`T = 512`). The full derivation is archived in [question_a_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_a_summary.md).
+**Answer:** In the simplified FFN-only XXL model, each block has
+
+$$
+2 \cdot d_{\text{model}} \cdot d_{\text{ff}} = 1{,}744{,}830{,}464
+$$
+
+parameters, so the full model has `219,848,638,464` parameters. Storing the master weights and accumulated gradients in FP32 requires `819.0 GiB` each, while Adam optimizer state requires `1638.0 GiB`, for a total of `3276.0 GiB` of FP32 model state; this is a lower bound of about `43.97` H100 80GB GPUs even before counting saved activations. Since attention is omitted, the saved-for-backward activations are no longer quadratic in sequence length, but they still scale with token count:
+
+$$
+\text{num\_blocks} \cdot B \cdot T \cdot (d_{\text{model}} + d_{\text{ff}}) \cdot 2
+= 17{,}547{,}264 \cdot B \cdot T \text{ bytes}.
+$$
+
+So the total training-memory requirement is
+
+$$
+3{,}517{,}578{,}215{,}424 + 17{,}547{,}264 \cdot B \cdot T \text{ bytes},
+$$
+
+corresponding to
+
+$$
+\left\lceil \frac{3{,}517{,}578{,}215{,}424 + 17{,}547{,}264 \cdot B \cdot T}{80 \cdot 10^9} \right\rceil
+$$
+
+H100 80GB GPUs. For three typical values using the assignment-wide default `B = 4`, the required H100 counts are about `44.08` (`T = 128`), `44.19` (`T = 256`), and `44.42` (`T = 512`). The full derivation is archived in [question_a_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_a_summary.md).
 
 ### (b)
 **Question:** Now assume your master weights, optimizer state, gradients and half of your activations (in practice every second layer) are sharded across `N_FSDP` devices. Write an expression for how much memory this would take per device. What value does `N_FSDP` need to be for the total memory cost to be less than 1 v5p TPU (95GB per device)?
 
 **Deliverable:** Your calculations and a one-sentence response.
 
-**Answer:** Let `W`, `G`, `O`, and `A` denote the memory for master weights, accumulated gradients, optimizer states, and saved activations respectively. Since the problem states that `W`, `G`, `O`, and half of the activations are sharded across `N_FSDP` devices, the per-device memory is `M(N_FSDP) = (W + G + O + 0.5A) / N_FSDP + 0.5A`. Using part (a), this becomes `(3,517,578,215,424 + 0.5 * (17,547,264 * B * T)) / N_FSDP + 0.5 * (17,547,264 * B * T)` bytes per device. Requiring this to be below `95 * 10^9` bytes gives `N_FSDP > (3,517,578,215,424 + 0.5 * (17,547,264 * B * T)) / (95 * 10^9 - 0.5 * (17,547,264 * B * T))`, so the minimum valid choice is the ceiling of that expression. For three typical values using `B = 4`, the minimum values are `39` (`T = 128`), `41` (`T = 256`), and `46` (`T = 512`). The full derivation is archived in [question_b_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_b_summary.md).
+**Answer:** Let `W`, `G`, `O`, and `A` denote the memory for master weights, accumulated gradients, optimizer states, and saved activations respectively. Since the problem states that `W`, `G`, `O`, and half of the activations are sharded across `N_FSDP` devices, the per-device memory is
+
+$$
+M(N_{\text{FSDP}}) = \frac{W + G + O + 0.5A}{N_{\text{FSDP}}} + 0.5A.
+$$
+
+Using part (a), this becomes
+
+$$
+\frac{3{,}517{,}578{,}215{,}424 + 0.5 \cdot (17{,}547{,}264 \cdot B \cdot T)}{N_{\text{FSDP}}}
++ 0.5 \cdot (17{,}547{,}264 \cdot B \cdot T)
+$$
+
+bytes per device. Requiring this to be below `95 * 10^9` bytes gives
+
+$$
+N_{\text{FSDP}} >
+\frac{3{,}517{,}578{,}215{,}424 + 0.5 \cdot (17{,}547{,}264 \cdot B \cdot T)}
+{95 \cdot 10^9 - 0.5 \cdot (17{,}547{,}264 \cdot B \cdot T)},
+$$
+
+so the minimum valid choice is the ceiling of that expression. For three typical values using `B = 4`, the minimum values are `39` (`T = 128`), `41` (`T = 256`), and `46` (`T = 512`). The full derivation is archived in [question_b_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_b_summary.md).
 
 ### (c)
 **Question:** Consider only the forward pass. Use the communication bandwidth of `W_ici = 2 * 9 * 10^10` and FLOPS/s of `C = 4.6 * 10^14` for TPU v5p as given in the TPU Scaling Book. Following the notation of the Scaling Book, use `M_X = 2`, `M_Y = 1` (a 3D mesh), with `X = 16` being your FSDP dimension, and `Y = 4` being your TP dimension. At what per-device batch size is this model compute bound? What is the overall batch size in this setting?
 
 **Deliverable:** Your calculations and a one-sentence response.
 
-**Answer:** Following the mixed FSDP + TP forward-pass model from the Scaling Book, we compare `T_math = 4 * B * D * F / (N * C)` against `T_comms = max(T_FSDP, T_TP)`, where `T_FSDP = 4 * D * F / (Y * W_ici * M_X)` and `T_TP = 4 * B * D / (X * W_ici * M_Y)`. Writing `b = B / N` for the per-device token batch size and using `C = 4.6 * 10^14`, `W_ici = 2 * 9 * 10^10`, `Y = 4`, and `M_X = 2`, the FSDP-side compute-bound threshold is `b >= C / (Y * W_ici * M_X) = 2555.56 / (4 * 2) = 319.44` tokens per device, so the minimum integer per-device batch is `320` tokens. With `N = X * Y = 64`, the corresponding overall token batch threshold is `319.44 * 64 = 20,444.44`, so the minimum integer overall batch is `20,480` tokens. The TP-side condition `F >= (C / W_ici) * (Y / M_Y)` is also satisfied because `53,248 > 10,222.22`, so the FSDP communication term is the limiting factor. The full derivation is archived in [question_c_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_c_summary.md).
+**Answer:** Following the mixed FSDP + TP forward-pass model from the Scaling Book, we compare
+
+$$
+T_{\text{math}} = \frac{4 B D F}{N C}
+$$
+
+against
+
+$$
+T_{\text{comms}} = \max(T_{\text{FSDP}}, T_{\text{TP}}),
+$$
+
+where
+
+$$
+T_{\text{FSDP}} = \frac{4 D F}{Y W_{\text{ici}} M_X}
+\quad \text{and} \quad
+T_{\text{TP}} = \frac{4 B D}{X W_{\text{ici}} M_Y}.
+$$
+
+Writing $b = B / N$ for the per-device token batch size and using `C = 4.6 * 10^14`, `W_ici = 2 * 9 * 10^10`, `Y = 4`, and `M_X = 2`, the FSDP-side compute-bound threshold is
+
+$$
+b \geq \frac{C}{Y W_{\text{ici}} M_X}
+= \frac{2555.56}{4 \cdot 2}
+= 319.44,
+$$
+
+tokens per device, so the minimum integer per-device batch is `320` tokens. With `N = X * Y = 64`, the corresponding overall token batch threshold is `319.44 * 64 = 20,444.44`, so the minimum integer overall batch is `20,480` tokens. The TP-side condition
+
+$$
+F \geq \left(\frac{C}{W_{\text{ici}}}\right)\left(\frac{Y}{M_Y}\right)
+$$
+
+is also satisfied because `53,248 > 10,222.22`, so the FSDP communication term is the limiting factor. The full derivation is archived in [question_c_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_c_summary.md).
 
 ### (d)
 **Question:** In practice, we want the overall batch size to be as small as possible, and we also always use our compute effectively (in other words we want to never be communication bound). What other tricks can we employ to reduce the batch size of our model but retain high throughput?
