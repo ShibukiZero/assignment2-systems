@@ -192,7 +192,7 @@ Forward-only peak memory grows with context length but only moderately, whereas 
 **Answer:** For the 2.7B model, the residual-stream activation tensor at the reference hyperparameters has shape
 
 $$
-(\text{batch\_size}, \text{context\_length}, d_{\text{model}}) = (4, 128, 2560),
+(\mathrm{batch\ size}, \mathrm{context\ length}, d_{\mathrm{model}}) = (4, 128, 2560),
 $$
 
 so it contains
@@ -214,7 +214,7 @@ after dividing by $1024^2$.
 
 **Deliverable:** A 1-2 sentence response.
 
-**Answer:** The largest allocations visible in the forward-pass memory snapshot are about `128 MiB` each. Their stack traces point to the `softmax` call inside `scaled_dot_product_attention`, which matches the size of an explicitly materialized attention score/weight tensor of shape $(\text{batch}, \text{heads}, \text{seq\_len}, \text{seq\_len})$ for the `2.7b` model at `batch=4`, `heads=32`, and `seq_len=512`:
+**Answer:** The largest allocations visible in the forward-pass memory snapshot are about `128 MiB` each. Their stack traces point to the `softmax` call inside `scaled_dot_product_attention`, which matches the size of an explicitly materialized attention score/weight tensor of shape $(\mathrm{batch}, \mathrm{heads}, \mathrm{seq\ len}, \mathrm{seq\ len})$ for the `2.7b` model at `batch=4`, `heads=32`, and `seq_len=512`:
 
 $$
 4 \cdot 32 \cdot 512 \cdot 512 \cdot 4 \text{ bytes} = 128 \text{ MiB}.
@@ -688,7 +688,7 @@ $$
 parameters, so the full model has `219,848,638,464` parameters. Storing the master weights and accumulated gradients in FP32 requires `819.0 GiB` each, while Adam optimizer state requires `1638.0 GiB`, for a total of `3276.0 GiB` of FP32 model state; this is a lower bound of about `43.97` H100 80GB GPUs even before counting saved activations. Since attention is omitted, the saved-for-backward activations are no longer quadratic in sequence length, but they still scale with token count:
 
 $$
-\text{num\_blocks} \cdot B \cdot T \cdot (d_{\text{model}} + d_{\text{ff}}) \cdot 2
+\mathrm{num\ blocks} \cdot B \cdot T \cdot (d_{\mathrm{model}} + d_{\mathrm{ff}}) \cdot 2
 = 17{,}547{,}264 \cdot B \cdot T \text{ bytes}.
 $$
 
