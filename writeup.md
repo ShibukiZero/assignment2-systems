@@ -720,8 +720,10 @@ $$
 Using part (a), this becomes
 
 $$
+\begin{aligned}
 \frac{3{,}517{,}578{,}215{,}424 + 0.5 \cdot (17{,}547{,}264 \cdot B \cdot T)}{N_{\text{FSDP}}}
-+ 0.5 \cdot (17{,}547{,}264 \cdot B \cdot T)
+&+ 0.5 \cdot (17{,}547{,}264 \cdot B \cdot T)
+\end{aligned}
 $$
 
 bytes per device. Requiring this to be below $95 \cdot 10^9$ bytes gives
