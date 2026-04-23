@@ -707,11 +707,11 @@ $$
 H100 80GB GPUs. For three typical values using the assignment-wide default `B = 4`, the required H100 counts are about `44.08` (`T = 128`), `44.19` (`T = 256`), and `44.42` (`T = 512`). The full derivation is archived in [question_a_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_a_summary.md).
 
 ### (b)
-**Question:** Now assume your master weights, optimizer state, gradients and half of your activations (in practice every second layer) are sharded across `N_FSDP` devices. Write an expression for how much memory this would take per device. What value does `N_FSDP` need to be for the total memory cost to be less than 1 v5p TPU (95GB per device)?
+**Question:** Now assume your master weights, optimizer state, gradients and half of your activations (in practice every second layer) are sharded across $N_{\mathrm{FSDP}}$ devices. Write an expression for how much memory this would take per device. What value does $N_{\mathrm{FSDP}}$ need to be for the total memory cost to be less than 1 v5p TPU (95GB per device)?
 
 **Deliverable:** Your calculations and a one-sentence response.
 
-**Answer:** Let `W`, `G`, `O`, and `A` denote the memory for master weights, accumulated gradients, optimizer states, and saved activations respectively. Since the problem states that `W`, `G`, `O`, and half of the activations are sharded across `N_FSDP` devices, the per-device memory is
+**Answer:** Let $W$, $G$, $O$, and $A$ denote the memory for master weights, accumulated gradients, optimizer states, and saved activations respectively. Since the problem states that $W$, $G$, $O$, and half of the activations are sharded across $N_{\mathrm{FSDP}}$ devices, the per-device memory is
 
 $$
 M(N_{\text{FSDP}}) = \frac{W + G + O + 0.5A}{N_{\text{FSDP}}} + 0.5A.
@@ -724,7 +724,7 @@ $$
 + 0.5 \cdot (17{,}547{,}264 \cdot B \cdot T)
 $$
 
-bytes per device. Requiring this to be below `95 * 10^9` bytes gives
+bytes per device. Requiring this to be below $95 \cdot 10^9$ bytes gives
 
 $$
 N_{\text{FSDP}} >
@@ -732,10 +732,10 @@ N_{\text{FSDP}} >
 {95 \cdot 10^9 - 0.5 \cdot (17{,}547{,}264 \cdot B \cdot T)},
 $$
 
-so the minimum valid choice is the ceiling of that expression. For three typical values using `B = 4`, the minimum values are `39` (`T = 128`), `41` (`T = 256`), and `46` (`T = 512`). The full derivation is archived in [question_b_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_b_summary.md).
+so the minimum valid choice is the ceiling of that expression. For three typical values using $B = 4$, the minimum values are `39` ($T = 128$), `41` ($T = 256$), and `46` ($T = 512$). The full derivation is archived in [question_b_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_b_summary.md).
 
 ### (c)
-**Question:** Consider only the forward pass. Use the communication bandwidth of `W_ici = 2 * 9 * 10^10` and FLOPS/s of `C = 4.6 * 10^14` for TPU v5p as given in the TPU Scaling Book. Following the notation of the Scaling Book, use `M_X = 2`, `M_Y = 1` (a 3D mesh), with `X = 16` being your FSDP dimension, and `Y = 4` being your TP dimension. At what per-device batch size is this model compute bound? What is the overall batch size in this setting?
+**Question:** Consider only the forward pass. Use the communication bandwidth of $W_{\mathrm{ici}} = 2 \cdot 9 \cdot 10^{10}$ and FLOPS/s of $C = 4.6 \cdot 10^{14}$ for TPU v5p as given in the TPU Scaling Book. Following the notation of the Scaling Book, use $M_X = 2$, $M_Y = 1$ (a 3D mesh), with $X = 16$ being your FSDP dimension, and $Y = 4$ being your TP dimension. At what per-device batch size is this model compute bound? What is the overall batch size in this setting?
 
 **Deliverable:** Your calculations and a one-sentence response.
 
@@ -759,7 +759,7 @@ T_{\text{FSDP}} = \frac{4 D F}{Y W_{\text{ici}} M_X}
 T_{\text{TP}} = \frac{4 B D}{X W_{\text{ici}} M_Y}.
 $$
 
-Writing $b = B / N$ for the per-device token batch size and using `C = 4.6 * 10^14`, `W_ici = 2 * 9 * 10^10`, `Y = 4`, and `M_X = 2`, the FSDP-side compute-bound threshold is
+Writing $b = B / N$ for the per-device token batch size and using $C = 4.6 \cdot 10^{14}$, $W_{\mathrm{ici}} = 2 \cdot 9 \cdot 10^{10}$, $Y = 4$, and $M_X = 2$, the FSDP-side compute-bound threshold is
 
 $$
 b \geq \frac{C}{Y W_{\text{ici}} M_X}
@@ -767,20 +767,20 @@ b \geq \frac{C}{Y W_{\text{ici}} M_X}
 = 319.44,
 $$
 
-tokens per device, so the minimum integer per-device batch is `320` tokens. With `N = X * Y = 64`, the corresponding overall token batch threshold is `319.44 * 64 = 20,444.44`, so the minimum integer overall batch is `20,480` tokens. The TP-side condition
+tokens per device, so the minimum integer per-device batch is `320` tokens. With $N = X \cdot Y = 64$, the corresponding overall token batch threshold is $319.44 \cdot 64 = 20{,}444.44$, so the minimum integer overall batch is `20,480` tokens. The TP-side condition
 
 $$
 F \geq \left(\frac{C}{W_{\text{ici}}}\right)\left(\frac{Y}{M_Y}\right)
 $$
 
-is also satisfied because `53,248 > 10,222.22`, so the FSDP communication term is the limiting factor. The full derivation is archived in [question_c_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_c_summary.md).
+is also satisfied because $53{,}248 > 10{,}222.22$, so the FSDP communication term is the limiting factor. The full derivation is archived in [question_c_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_c_summary.md).
 
 ### (d)
 **Question:** In practice, we want the overall batch size to be as small as possible, and we also always use our compute effectively (in other words we want to never be communication bound). What other tricks can we employ to reduce the batch size of our model but retain high throughput?
 
 **Deliverable:** A one-paragraph response. Back up your claims with references and/or equations.
 
-**Answer:** Part (c) already assumes an idealized overlap model, so the cleanest ways to reduce the batch size needed for high throughput are the ones that directly improve the communication terms rather than simply "adding more overlap." One option is to increase the effective communication bandwidth, i.e. to improve `M_X` and `M_Y` through a better topology / placement so that the collective terms shrink. A second option is to rebalance the hybrid parallelism by changing `X` and `Y`, so that neither the FSDP nor the TP communication term dominates the other. A third option is to reduce the communication volume itself, for example with lower-precision communication or more communication-efficient collectives, which shifts the compute/communication crossover to a smaller batch. Finally, gradient accumulation is a practical engineering workaround: it does change training dynamics by increasing the effective batch per optimizer step, but it lets us keep the instantaneous microbatch small enough to fit memory while amortizing synchronization overhead across more local work. A longer summary of these tradeoffs is archived in [question_d_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_d_summary.md).
+**Answer:** Part (c) already assumes an idealized overlap model, so the cleanest ways to reduce the batch size needed for high throughput are the ones that directly improve the communication terms rather than simply "adding more overlap." One option is to increase the effective communication bandwidth, i.e. to improve $M_X$ and $M_Y$ through a better topology / placement so that the collective terms shrink. A second option is to rebalance the hybrid parallelism by changing $X$ and $Y$, so that neither the FSDP nor the TP communication term dominates the other. A third option is to reduce the communication volume itself, for example with lower-precision communication or more communication-efficient collectives, which shifts the compute/communication crossover to a smaller batch. Finally, gradient accumulation is a practical engineering workaround: it does change training dynamics by increasing the effective batch per optimizer step, but it lets us keep the instantaneous microbatch small enough to fit memory while amortizing synchronization overhead across more local work. A longer summary of these tradeoffs is archived in [question_d_summary.md](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch2/2_4_communication_accounting/question_d_summary.md).
 
 ---
 
