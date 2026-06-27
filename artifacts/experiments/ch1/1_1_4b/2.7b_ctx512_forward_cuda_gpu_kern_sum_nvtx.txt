@@ -3,27 +3,28 @@ NOTICE: Existing SQLite export found: .agents/logs/1_1_4_forward_attention/2.7b_
         It is assumed file was previously exported from: .agents/logs/1_1_4_forward_attention/2.7b_ctx512_forward_attention.nsys-rep
         Consider using --force-export=true if needed.
 
-Processing [.agents/logs/1_1_4_forward_attention/2.7b_ctx512_forward_attention.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.1.1/target-linux-x64/reports/cuda_gpu_kern_sum.py](nvtx-name:base)... 
+Processing [.agents/logs/1_1_4_forward_attention/2.7b_ctx512_forward_attention.sqlite] with [/usr/local/cuda-13.1/NsightSystems-cli-2025.6.1/target-linux-x64/reports/cuda_gpu_kern_sum.py](nvtx-name:base)...
 
  ** CUDA GPU Kernel Summary (cuda_gpu_kern_sum):
 
- Time (%)  Total Time (ns)  Instances  Avg (ns)   Med (ns)   Min (ns)  Max (ns)  StdDev (ns)                                                  Name                                                
- --------  ---------------  ---------  ---------  ---------  --------  --------  -----------  ----------------------------------------------------------------------------------------------------
-     45.5       4361845774        975  4473688.0  4477428.0   4390159   4512497      12741.9  forward/sm80_xmma_gemm_f32f32_f32f32_f32_tn_n_tilesize64x64x8_stage3_warpsize1x4x1_ffma_aligna4_ali…
-     43.8       4205732475       2400  1752388.5  1152757.0   1148437   4180843    1201002.1  forward/sm80_xmma_gemm_f32f32_f32f32_f32_tn_n_tilesize128x64x8_stage3_warpsize2x2x1_ffma_aligna4_al…
-      2.0        193326715       8670    22298.4    23120.5      2464     28448       5222.0  forward/elementwise_kernel                                                                          
-      1.8        170307236        960   177403.4   177507.0    160931    194020      15878.0  attention_softmax/elementwise_kernel                                                                
-      1.5        142841032        480   297585.5   297573.0    296742    299590        421.7  attention_value_matmul/sm80_xmma_gemm_f32f32_f32f32_f32_nn_n_tilesize128x32x8_stage3_warpsize2x2x1_…
-      1.4        133503058        480   278131.4   278149.0    274501    279557        523.3  attention_scores_matmul/sm80_xmma_gemm_f32f32_f32f32_f32_tn_n_tilesize128x64x8_stage3_warpsize2x2x1…
-      1.3        127913629       7245    17655.4     6976.0       896     70625      22545.7  forward/vectorized_elementwise_kernel                                                               
-      0.8         76642655        960    79836.1    80161.0     58753     99170      18550.7  attention_softmax/reduce_kernel                                                                     
-      0.8         73487517        480   153099.0   153219.0    152387    153891        364.0  scaled_dot_product_attention/elementwise_kernel                                                     
-      0.4         38689935        480    80604.0    80673.0     79745     81601        424.2  attention_scores_matmul/vectorized_elementwise_kernel                                               
-      0.4         38125716        480    79428.6    79554.0     78465     80994        454.6  attention_softmax/vectorized_elementwise_kernel                                                     
-      0.1         14339299        480    29873.5    29760.0     29504     30624        307.8  attention_value_matmul/elementwise_kernel                                                           
-      0.1          9862731        975    10115.6    10336.0      8192     11680        731.1  forward/reduce_kernel                                                                               
-      0.1          5686614        975     5832.4     5248.0      4832     43329       4612.6  forward/index_elementwise_kernel                                                                    
-      0.0           725708        960      755.9      736.0       704       960         51.0  forward/elementwise_kernel_with_index                                                               
-      0.0           362403        480      755.0      736.0       640      1984        103.9  scaled_dot_product_attention/vectorized_elementwise_kernel                                          
-      0.0             2784          2     1392.0     1392.0      1312      1472        113.1  distribution_elementwise_grid_stride_kernel                                                         
+ Time (%)  Total Time (ns)  Instances  Avg (ns)  Med (ns)  Min (ns)  Max (ns)  StdDev (ns)                                                  Name
+ --------  ---------------  ---------  --------  --------  --------  --------  -----------  ----------------------------------------------------------------------------------------------------
+     34.1        422470212       2895  145931.0   81439.0     76895    282492      92402.1  forward/sm90_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x128x32_warpgroupsize1x1x1_execute_segmen…
+     12.3        153188920       9165   16714.6    8032.0      1088     85087      25215.1  forward/vectorized_elementwise_kernel
+     10.6        130894394        480  272696.7  272701.0    270909    275997        796.3  forward/sm90_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x256x32_warpgroupsize2x1x1_execute_segmen…
+     10.4        128644516      10590   12147.7   12063.0      2688     21856       5684.4  forward/elementwise_kernel
+      9.2        114163976        960  118920.8  118878.5    111582    126847       6586.9  attention_softmax/elementwise_kernel
+      4.9         60253736        960   62764.3   62735.5     54783     70559       6443.4  attention_softmax/reduce_kernel
+      3.8         47620977        480   99210.4   99231.0     98303    100095        237.6  scaled_dot_product_attention/elementwise_kernel
+      3.5         43472705        480   90568.1   90719.0     89119     91519        520.4  attention_scores_matmul/vectorized_elementwise_kernel
+      3.4         42298315        480   88121.5   88223.0     86623     89119        461.6  attention_softmax/vectorized_elementwise_kernel
+      2.8         34126074        480   71096.0   71071.5     68639     74111        875.6  attention_scores_matmul/sm90_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x128x32_warpgroupsize1x1x…
+      2.7         33752236        480   70317.2   70319.5     68511     72095        603.8  attention_value_matmul/sm90_xmma_gemm_f32f32_tf32f32_f32_nn_n_tilesize128x128x32_warpgroupsize1x1x1…
+      0.9         10874846        975   11153.7   11136.0     10144     12512        389.8  forward/reduce_kernel
+      0.8         10252656        480   21359.7   21216.0     21024     22528        309.1  attention_value_matmul/elementwise_kernel
+      0.4          4875487        960    5078.6    5088.0      4768      5856        147.9  forward/index_elementwise_kernel
+      0.2          2784743       2880     966.9     960.0       896      1600         62.9  forward/elementwise_kernel_with_index
+      0.0           517431        480    1078.0    1056.0       960      2496        145.8  scaled_dot_product_attention/vectorized_elementwise_kernel
+      0.0           204157         15   13610.5   13664.0     12736     14176        316.9  forward/vectorized_gather_kernel
+      0.0             3232          2    1616.0    1616.0      1600      1632         22.6  distribution_elementwise_grid_stride_kernel
 

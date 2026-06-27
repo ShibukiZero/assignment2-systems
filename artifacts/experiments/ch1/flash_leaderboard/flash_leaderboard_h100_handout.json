@@ -1,0 +1,36 @@
+{
+  "benchmark": "flash_leaderboard",
+  "config": {
+    "batch_size": 1,
+    "num_heads": 16,
+    "d_head": 64,
+    "sequence_length": 16384,
+    "precision": "bf16",
+    "warmup_ms": 1000,
+    "rep_ms": 10000,
+    "seed": 0,
+    "device": "auto",
+    "is_causal": true,
+    "compile_flash": true,
+    "output_path": "/root/cs336-runs/a2_h100_leaderboard/flash_leaderboard_h100_handout.json"
+  },
+  "derived": {
+    "device": "cuda",
+    "effective_batch_for_flash_attention": 16,
+    "qkv_shape": [
+      16,
+      16384,
+      64
+    ],
+    "d_model": 1024,
+    "note": "The current FlashAttention interface accepts (batch, seq, d_head), so the leaderboard benchmark flattens batch_size * num_heads into the batch axis."
+  },
+  "results": {
+    "forward_backward_ms": 8.863531279409516,
+    "best_configs": {
+      "forward": null,
+      "backward_dq": null,
+      "backward_dkdv": null
+    }
+  }
+}

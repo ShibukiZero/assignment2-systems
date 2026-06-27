@@ -501,7 +501,7 @@ if triton is not None:
         )
         o_tile = tl.load(output_block_ptr, boundary_check=(0, 1), padding_option="zero")
         grad_o_tile = tl.load(grad_output_block_ptr, boundary_check=(0, 1), padding_option="zero")
-        delta_tile = tl.sum(grad_o_tile * o_tile, axis=1)
+        delta_tile = tl.sum(grad_o_tile * o_tile, axis=1).to(tl.float32)
         tl.store(delta_tile_block_ptr, delta_tile, boundary_check=(0,))
 
 
@@ -763,7 +763,7 @@ if triton is not None:
         configs=_FLASH_ATTENTION_BACKWARD_DQ_AUTOTUNE_CONFIGS,
         key=["N_QUERIES", "N_KEYS", "D", "IS_CAUSAL"],
     )(flash_attention_backward_dq_kernel)
-        
+
 
 
 else:

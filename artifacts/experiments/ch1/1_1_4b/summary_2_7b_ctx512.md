@@ -7,23 +7,24 @@ Forward-only trace:
 - Source profile: `.agents/logs/1_1_4_forward_attention/2.7b_ctx512_forward_attention.nsys-rep`
 - Report used: `cuda_gpu_kern_sum` and `cuda_gpu_kern_sum:nvtx-name:base`
 - Top cumulative kernel:
-  - `sm80_xmma_gemm_f32f32_f32f32_f32_tn_n_tilesize64x64x8_...`
+  - `sm90_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x128x32_...`
 - Total instances in the trace:
-  - `975`
+  - `3375`
 - Since the trace contains `5` warmup passes and `10` measured passes, this corresponds to about:
-  - `975 / 15 = 65` invocations per forward pass
+  - `3375 / 15 = 225` invocations per forward pass
 
 Training-step trace:
 
 - Source profile: `.agents/logs/1_1_4_train_step_attention/2.7b_ctx512_train_step_attention.nsys-rep`
 - Report used: `cuda_gpu_kern_sum` and `cuda_gpu_kern_sum:nvtx-name:base`
 - Top cumulative kernel:
-  - `sm80_xmma_gemm_f32f32_f32f32_f32_tn_n_tilesize128x64x8_...`
+  - `optimizer_step/vectorized_elementwise_kernel`
 
 Conclusion:
 
-For this representative configuration, the forward-only CUDA GPU Kernel Summary is dominated by the Tensor Core GEMM kernel `sm80_xmma_gemm_f32f32_f32f32_f32_tn_n_tilesize64x64x8_...`, which appears 975 times across 15 profiled forward passes, or about 65 times per forward pass. The full training-step CUDA GPU Kernel Summary is still dominated by a GEMM kernel, but the top entry changes to `sm80_xmma_gemm_f32f32_f32f32_f32_tn_n_tilesize128x64x8_...`, so it is not exactly the same kernel as in forward-only mode.
+For this representative H100 configuration, the forward-only CUDA GPU Kernel Summary is dominated by the Tensor Core GEMM kernel `sm90_xmma_gemm_f32f32_tf32f32_f32_tn_n_tilesize128x128x32_...`, which appears 3375 times across 15 profiled forward passes, or about 225 times per forward pass. In the full training-step CUDA GPU Kernel Summary, the largest cumulative entry is optimizer-related `vectorized_elementwise_kernel` time, so the top kernel is no longer the same once backward and AdamW are included.
 
 Evidence source:
 
-- Remote `nsys stats` output copied into `.agents/logs/terminal.log`
+- `2.7b_ctx512_forward_cuda_gpu_kern_sum.txt`
+- `2.7b_ctx512_train_step_cuda_gpu_kern_sum_nvtx.txt`

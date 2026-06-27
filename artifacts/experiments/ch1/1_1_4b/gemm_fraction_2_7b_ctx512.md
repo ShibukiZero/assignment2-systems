@@ -2,8 +2,8 @@
 
 | Trace | GEMM share (%) | Non-GEMM share (%) |
 | --- | ---: | ---: |
-| Forward-only | 92.20 | 7.80 |
-| Train-step | 83.90 | 15.90 |
+| Forward-only | 50.10 | 49.90 |
+| Train-step | 32.80 | 67.10 |
 
 Classification rule:
 

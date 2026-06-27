@@ -1,7 +1,8 @@
-## 1.1.3(c) Warmup Sensitivity
+# 1.1.3(c) Warmup Sensitivity
 
 Configuration:
 
+- hardware: `single NVIDIA H100 80GB HBM3`
 - context length: `128`
 - batch size: `4`
 - vocabulary size: `10,000`
@@ -11,29 +12,41 @@ Configuration:
 
 Warmup = `0`:
 
+Context length: 128
+Batch size: 4
+Precision: fp32
+Warmup steps: 0
+Measurement steps: 10
+
 | Model size | Forward mean (ms) | Forward std (ms) | Backward mean (ms) | Backward std (ms) | Total mean (ms) | Total std (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| small | 61.952 | 127.593 | 36.451 | 49.355 | 98.403 | 176.948 |
-| medium | 85.303 | 134.941 | 65.436 | 44.869 | 150.739 | 179.809 |
-| large | 107.603 | 142.390 | 130.120 | 40.883 | 237.724 | 183.273 |
-| xl | 147.018 | 144.945 | 226.578 | 41.748 | 373.596 | 186.694 |
-| 2.7b | 196.757 | 121.461 | 327.541 | 35.854 | 524.298 | 157.315 |
+| small | 70.824 | 138.522 | 28.828 | 35.125 | 99.652 | 173.232 |
+| medium | 92.084 | 171.811 | 46.389 | 35.481 | 138.473 | 207.290 |
+| large | 111.305 | 174.342 | 67.285 | 41.970 | 178.591 | 216.301 |
+| xl | 132.240 | 179.263 | 86.227 | 44.695 | 218.467 | 223.941 |
+| 2.7b | 106.683 | 174.661 | 94.627 | 30.276 | 201.310 | 204.937 |
 
 Warmup = `2`:
 
+Context length: 128
+Batch size: 4
+Precision: fp32
+Warmup steps: 2
+Measurement steps: 10
+
 | Model size | Forward mean (ms) | Forward std (ms) | Backward mean (ms) | Backward std (ms) | Total mean (ms) | Total std (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| small | 21.530 | 0.050 | 20.920 | 0.117 | 42.450 | 0.109 |
-| medium | 42.929 | 1.211 | 50.888 | 0.076 | 93.817 | 1.262 |
-| large | 63.079 | 0.172 | 117.294 | 0.337 | 180.373 | 0.266 |
-| xl | 102.325 | 2.679 | 213.560 | 0.186 | 315.885 | 2.657 |
-| 2.7b | 158.240 | 0.158 | 316.118 | 0.090 | 474.358 | 0.176 |
+| small | 28.363 | 30.559 | 17.775 | 0.708 | 46.139 | 31.237 |
+| medium | 37.254 | 0.673 | 35.601 | 1.503 | 72.854 | 1.912 |
+| large | 57.941 | 1.911 | 57.496 | 3.606 | 115.437 | 5.261 |
+| xl | 76.337 | 1.308 | 74.071 | 2.026 | 150.408 | 3.075 |
+| 2.7b | 51.515 | 1.342 | 85.308 | 0.146 | 136.822 | 1.409 |
 
 Warmup = `5` baseline:
 
-- See [`1_1_3b/summary.md`](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch1/1_1_3b/summary.md).
+- See [`1_1_3b/summary.md`](../1_1_3b/summary.md).
 
 Takeaway:
 
-- Without warmup, the first measured iteration absorbs one-time startup costs, which inflates both the means and the standard deviations.
-- Two warmup steps already bring the measurements much closer to the `warmup = 5` baseline, but small differences remain because some lazy initialization and normal run-to-run noise are still present.
+- Without warmup, the first measured iteration absorbs one-time startup costs and inflates variance.
+- Two warmup steps already brings measurements close to the five-warmup baseline, but small lazy-initialization and run-to-run effects remain.
