@@ -3,7 +3,7 @@
     "model_size": "xl",
     "vocab_size": 10000,
     "world_size": 2,
-    "output_path": ".agents/logs/3_1_optimizer_state_sharding/formula_xl_w2.json"
+    "output_path": "artifacts/experiments/ch3/3_1_optimizer_state_sharding/formula_xl_w2.json"
   },
   "parameter_count_breakdown": {
     "embedding": 16000000,

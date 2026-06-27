@@ -2,7 +2,7 @@
 
 Experiment:
 
-- Script: [`scripts/inspect_1_1_5a_autocast_dtypes.py`](/Users/linzihan/Github/assignment2-systems/scripts/inspect_1_1_5a_autocast_dtypes.py)
+- Script: `inspect_autocast_dtypes.py`
 - Device: CUDA
 - Precision mode: `torch.autocast(device_type="cuda", dtype=torch.float16)`
 

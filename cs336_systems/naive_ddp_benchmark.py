@@ -433,13 +433,13 @@ def resolve_torch_profiler_dir(config: BenchmarkConfig) -> Path:
     if config.torch_profiler_dir is not None:
         return Path(config.torch_profiler_dir)
 
-    log_dir = ".agents/logs/2_2_naive_ddp"
+    log_dir = "runs/logs/2_2_naive_ddp"
     if config.gradient_sync_mode == "flat":
-        log_dir = ".agents/logs/2_3_1_flat_ddp"
+        log_dir = "runs/logs/2_3_1_flat_ddp"
     elif config.gradient_sync_mode == "overlap_individual":
-        log_dir = ".agents/logs/2_3_2_overlap_individual"
+        log_dir = "runs/logs/2_3_2_overlap_individual"
     elif config.gradient_sync_mode == "bucketed":
-        log_dir = ".agents/logs/2_3_3_bucketed_ddp"
+        log_dir = "runs/logs/2_3_3_bucketed_ddp"
 
     dirname = (
         f"torch_profiler_{config.model_size}_ctx{config.context_length}_"
@@ -574,13 +574,13 @@ def resolve_output_path(output_path: str | None, payload: dict[str, object]) -> 
         return Path(output_path)
 
     config = payload["config"]
-    log_dir = ".agents/logs/2_2_naive_ddp"
+    log_dir = "runs/logs/2_2_naive_ddp"
     if config["gradient_sync_mode"] == "flat":
-        log_dir = ".agents/logs/2_3_1_flat_ddp"
+        log_dir = "runs/logs/2_3_1_flat_ddp"
     elif config["gradient_sync_mode"] == "overlap_individual":
-        log_dir = ".agents/logs/2_3_2_overlap_individual"
+        log_dir = "runs/logs/2_3_2_overlap_individual"
     elif config["gradient_sync_mode"] == "bucketed":
-        log_dir = ".agents/logs/2_3_3_bucketed_ddp"
+        log_dir = "runs/logs/2_3_3_bucketed_ddp"
 
     filename = (
         f"{config['mode']}_{config['model_size']}_ctx{config['context_length']}_"

@@ -10,7 +10,7 @@ Representative configuration:
 Evidence source:
 
 - `CUDA GPU Kernel Summary` for the representative forward trace
-- raw summaries archived under [`1_1_4b/`](/Users/linzihan/Github/assignment2-systems/artifacts/experiments/ch1/1_1_4b)
+- raw summaries archived under `../1_1_4b/`
 
 Observed non-matmul kernel families with visible runtime:
 

@@ -15,7 +15,7 @@ Runtime evidence from `nvtx_gpu_proj_sum`:
 | attention_softmax | 480 | 626,460.6 | 300,701,099 |
 | attention_value_matmul | 480 | 329,561.3 | 158,189,405 |
 
-FLOP evidence from `scripts/calc_1_1_4e_attention_flops.py`:
+FLOP evidence from `calc_attention_flops.py`:
 
 | Operation | Per-layer FLOPs | Ratio vs softmax |
 | --- | ---: | ---: |

@@ -12,7 +12,7 @@
     "device": "auto",
     "is_causal": true,
     "compile_flash": true,
-    "output_path": "/root/cs336-runs/a2_h100_leaderboard/flash_leaderboard_h100_handout.json"
+    "output_path": "artifacts/experiments/ch1/flash_leaderboard/flash_leaderboard_h100_handout.json"
   },
   "derived": {
     "device": "cuda",

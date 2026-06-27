@@ -521,7 +521,7 @@ def resolve_output_path(output_path: str | None, payload: dict[str, object]) -> 
         return Path(output_path)
 
     config = payload["config"]
-    log_dir = ".agents/logs/3_1_optimizer_state_sharding"
+    log_dir = "runs/logs/3_1_optimizer_state_sharding"
     filename = (
         f"{config['mode']}_{config['optimizer_mode']}_{config['model_size']}_"
         f"ctx{config['context_length']}_{config['backend']}_w{config['world_size']}_"

@@ -19,7 +19,7 @@
     "seed": 0,
     "master_addr": "127.0.0.1",
     "master_port": 29510,
-    "output_path": ".agents/logs/3_1_optimizer_state_sharding/memory_full_xl_ctx128_nccl_w2_gbs8_fp32.json"
+    "output_path": "artifacts/experiments/ch3/3_1_optimizer_state_sharding/memory_full_xl_ctx128_nccl_w2_gbs8_fp32.json"
   },
   "per_rank": [
     {

@@ -1,6 +1,6 @@
 # Flash Benchmark Table
 
-- Source: `.agents/logs/flash_benchmark/results.json`
+- Source: historical `flash_benchmark/results.json`
 - Batch size: `1`
 - Causal: `True`
 - Warmup: `200` ms

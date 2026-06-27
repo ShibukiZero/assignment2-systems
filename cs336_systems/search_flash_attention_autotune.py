@@ -16,7 +16,7 @@ DEFAULT_KERNEL_NAMES = ("forward", "backward_dq", "backward_dkdv")
 DEFAULT_NUM_WARPS = (2, 4, 8)
 DEFAULT_NUM_STAGES = (2, 3, 4)
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("flash_attention_autotune_configs.json")
-DEFAULT_SEARCH_SPACE_ARCHIVE_PATH = Path(".agents/logs/flash_leaderboard/autotune_search_space.json")
+DEFAULT_SEARCH_SPACE_ARCHIVE_PATH = Path("runs/logs/flash_leaderboard/autotune_search_space.json")
 
 
 def _is_power_of_two(value: int) -> bool:
@@ -182,7 +182,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--benchmark-output-path",
         type=str,
-        default=".agents/logs/flash_leaderboard/autotune_search.json",
+        default="runs/logs/flash_leaderboard/autotune_search.json",
     )
     parser.add_argument(
         "--config-path",
