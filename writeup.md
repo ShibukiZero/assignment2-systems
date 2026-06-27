@@ -93,7 +93,7 @@ print(s)
 
 **Deliverable:** A 2-3 sentence response.
 
-**Answer:** Accumulating `0.01` in FP32 stays very close to the expected value of `10`, while accumulating in FP16 underestimates much more noticeably (`9.9531` in our run), because both the input value and the running sum are repeatedly rounded at FP16 precision. Using FP16 inputs with an FP32 accumulator is much more accurate (`10.0021` here), even though it is still slightly worse than pure FP32 because the value `0.01` has already been quantized once when it is first represented in FP16. This illustrates why mixed-precision training usually keeps reductions and accumulations in higher precision even when some inputs or matmuls use lower precision.
+**Answer:** Accumulating `0.01` in FP32 stays very close to the expected value of `10`, while accumulating in FP16 underestimates much more noticeably (`9.9531` in this run), because both the input value and the running sum are repeatedly rounded at FP16 precision. Using FP16 inputs with an FP32 accumulator is much more accurate (`10.0021` here), even though it is still slightly worse than pure FP32 because the value `0.01` has already been quantized once when it is first represented in FP16. This illustrates why mixed-precision training usually keeps reductions and accumulations in higher precision even when some inputs or matmuls use lower precision.
 
 ### 1.1.5(a) Dtypes Under Autocast
 **Question:** Consider the following model. Suppose we are training the model on a GPU and that the model parameters are originally in FP32. We'd like to use autocasting mixed precision with FP16. What are the data types of:
@@ -123,7 +123,7 @@ class ToyModel(nn.Module):
 
 **Deliverable:** The data types for each of the components listed above.
 
-**Answer:** In our CUDA autocast check, the model parameters remain `float32`, the output of the first feed-forward layer (`fc1`) is `float16`, the output of layer norm is `float32`, the model logits are `float16`, the loss is `float32`, and the gradients are `float32`. This matches the intended mixed-precision pattern: linear layers run in lower precision where possible, while numerically sensitive normalization, loss computation, and stored parameter/gradient state stay in FP32.
+**Answer:** In the CUDA autocast check, the model parameters remain `float32`, the output of the first feed-forward layer (`fc1`) is `float16`, the output of layer norm is `float32`, the model logits are `float16`, the loss is `float32`, and the gradients are `float32`. This matches the intended mixed-precision pattern: linear layers run in lower precision where possible, while numerically sensitive normalization, loss computation, and stored parameter/gradient state stay in FP32.
 
 ### 1.1.5(b) LayerNorm and Mixed Precision
 **Question:** You should have seen that FP16 mixed precision autocasting treats the layer normalization layer differently than the feed-forward layers. What parts of layer normalization are sensitive to mixed precision? If we use BF16 instead of FP16, do we still need to treat layer normalization differently? Why or why not?
@@ -333,7 +333,7 @@ Specifically, you will report a table that includes latencies for forward, backw
 
 **Deliverable:** A table of results comparing your implementation of FlashAttention-2 with the PyTorch implementation, using the settings above and reporting forward, backward, and end-to-end latencies.
 
-**Answer:** We benchmarked the requested sweep on a single NVIDIA H100 80GB HBM3 with batch size `1`, causal masking enabled, and fixed `q_tile_size = k_tile_size = 16`. The H100 rerun shows that the Triton FlashAttention implementation is faster end-to-end for the successful PyTorch comparisons, and it remains runnable at `seq_len = 65536` where the regular PyTorch implementation runs out of memory for every tested precision and head dimension. The full archived table is in `artifacts/experiments/ch1/1_3_2/summary.md`.
+**Answer:** The requested sweep was benchmarked on a single NVIDIA H100 80GB HBM3 with batch size `1`, causal masking enabled, and fixed `q_tile_size = k_tile_size = 16`. The H100 rerun shows that the Triton FlashAttention implementation is faster end-to-end for the successful PyTorch comparisons, and it remains runnable at `seq_len = 65536` where the regular PyTorch implementation runs out of memory for every tested precision and head dimension. The full archived table is in `artifacts/experiments/ch1/1_3_2/summary.md`.
 
 | Seq | D | Precision | Q tile | K tile | PT status | PT fwd (ms) | PT bwd (ms) | PT e2e (ms) | Flash status | Flash fwd (ms) | Flash bwd (ms) | Flash e2e (ms) | E2E speedup |
 | ---: | ---: | --- | ---: | ---: | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |
@@ -422,7 +422,7 @@ Specifically, you will report a table that includes latencies for forward, backw
 
 ## Problem `flash_leaderboard`: FlashAttention-2 Leaderboard
 
-**Answer:** We benchmarked the leaderboard configuration with BF16 causal attention, batch size `1`, sequence length `16384`, `16` heads, and head dimension `64`. Because the current FlashAttention interface accepts `(batch, seq, d_head)`, the benchmark flattens `batch_size * num_heads` into an effective batch of `16`.
+**Answer:** The leaderboard configuration was benchmarked with BF16 causal attention, batch size `1`, sequence length `16384`, `16` heads, and head dimension `64`. Because the current FlashAttention interface accepts `(batch, seq, d_head)`, the benchmark flattens `batch_size * num_heads` into an effective batch of `16`.
 
 On a single NVIDIA H100 80GB HBM3, the handout-style benchmark window (`warmup=1000 ms`, `rep=10000 ms`) measured `8.864 ms` for the combined forward-backward pass with `torch.compile` enabled. The raw benchmark payload is archived in `artifacts/experiments/ch1/flash_leaderboard/flash_leaderboard_h100_handout.json`.
 
@@ -443,7 +443,7 @@ Resource requirements: Up to 6 GPUs. Each benchmarking run should take less than
 
 **Answer:**
 
-We benchmarked single-node `all_reduce` with `5` warmup iterations and `20` measured iterations per configuration, aggregating per-iteration timings across ranks. We compared `Gloo + CPU` and `NCCL + GPU` on float32 tensors of size `1 MB`, `10 MB`, `100 MB`, and `1 GB`, while varying the number of worker processes over `2`, `4`, and `6`. The full archived summary is in `artifacts/experiments/ch2/2_1_1/summary.md`, and the raw benchmark payload is in `artifacts/experiments/ch2/2_1_1/results.json`.
+Single-node `all_reduce` was benchmarked with `5` warmup iterations and `20` measured iterations per configuration, aggregating per-iteration timings across ranks. `Gloo + CPU` and `NCCL + GPU` were compared on float32 tensors of size `1 MB`, `10 MB`, `100 MB`, and `1 GB`, while varying the number of worker processes over `2`, `4`, and `6`. The full archived summary is in `artifacts/experiments/ch2/2_1_1/summary.md`, and the raw benchmark payload is in `artifacts/experiments/ch2/2_1_1/results.json`.
 
 Gloo + CPU:
 
@@ -476,7 +476,7 @@ The dominant trend is that `NCCL + GPU` is consistently much faster than `Gloo +
 
 Setup:
 
-We benchmarked the naive DDP training loop in a single-node `2`-GPU configuration using the `XL` language model, `NCCL`, context length `128`, global batch size `8`, and `fp32` precision. Each run used `5` warmup iterations followed by `20` measured iterations, and we aggregated timing statistics across both ranks. The archived summary is in `artifacts/experiments/ch2/2_2_naive_ddp/summary.md`, and the raw benchmark payload is in `artifacts/experiments/ch2/2_2_naive_ddp/timer_xl_ctx128_nccl_w2_gbs8_fp32.json`.
+The naive DDP training loop was benchmarked in a single-node `2`-GPU configuration using the `XL` language model, `NCCL`, context length `128`, global batch size `8`, and `fp32` precision. Each run used `5` warmup iterations followed by `20` measured iterations, with timing statistics aggregated across both ranks. The archived summary is in `artifacts/experiments/ch2/2_2_naive_ddp/summary.md`, and the raw benchmark payload is in `artifacts/experiments/ch2/2_2_naive_ddp/timer_xl_ctx128_nccl_w2_gbs8_fp32.json`.
 
 Results:
 
@@ -507,7 +507,7 @@ The Nsight Systems trace is also consistent with this timing breakdown: in the m
 
 Results:
 
-We reran both the individual-gradient baseline and the flattened-gradient variant with the same benchmark script and the same setup: `1` node, `2` GPUs, `XL` model size, context length `128`, global batch size `8`, `fp32`, `5` warmup iterations, and `20` measured iterations. The archived comparison summary is in `artifacts/experiments/ch2/2_3_1_flat_ddp/summary.md`, and the two raw benchmark payloads are in `artifacts/experiments/ch2/2_3_1_flat_ddp/individual_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json` and `artifacts/experiments/ch2/2_3_1_flat_ddp/flat_xl_ctx128_nccl_w2_gbs8_fp32.json`.
+Both the individual-gradient baseline and the flattened-gradient variant were rerun with the same benchmark script and the same setup: `1` node, `2` GPUs, `XL` model size, context length `128`, global batch size `8`, `fp32`, `5` warmup iterations, and `20` measured iterations. The archived comparison summary is in `artifacts/experiments/ch2/2_3_1_flat_ddp/summary.md`, and the two raw benchmark payloads are in `artifacts/experiments/ch2/2_3_1_flat_ddp/individual_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json` and `artifacts/experiments/ch2/2_3_1_flat_ddp/flat_xl_ctx128_nccl_w2_gbs8_fp32.json`.
 
 | Metric | Individual all-reduce | Flattened all-reduce |
 | --- | ---: | ---: |
@@ -544,7 +544,7 @@ Flattened all-reduce CUDA HW trace:
 
 Results:
 
-We benchmarked the overlap-individual DDP implementation in the same setting as the previous experiments: `1` node, `2` GPUs, `XL` model size, context length `128`, global batch size `8`, `fp32`, `5` warmup iterations, and `20` measured iterations. The archived comparison summary is in `artifacts/experiments/ch2/2_3_2_overlap_individual/summary.md`, and the raw benchmark payloads are in `artifacts/experiments/ch2/2_3_2_overlap_individual/individual_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json`, `artifacts/experiments/ch2/2_3_2_overlap_individual/flat_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json`, and `artifacts/experiments/ch2/2_3_2_overlap_individual/overlap_individual_xl_ctx128_nccl_w2_gbs8_fp32.json`.
+The overlap-individual DDP implementation was benchmarked in the same setting as the previous experiments: `1` node, `2` GPUs, `XL` model size, context length `128`, global batch size `8`, `fp32`, `5` warmup iterations, and `20` measured iterations. The archived comparison summary is in `artifacts/experiments/ch2/2_3_2_overlap_individual/summary.md`, and the raw benchmark payloads are in `artifacts/experiments/ch2/2_3_2_overlap_individual/individual_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json`, `artifacts/experiments/ch2/2_3_2_overlap_individual/flat_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json`, and `artifacts/experiments/ch2/2_3_2_overlap_individual/overlap_individual_xl_ctx128_nccl_w2_gbs8_fp32.json`.
 
 | Metric | Naive individual | Flattened | Overlap individual |
 | --- | ---: | ---: | ---: |
@@ -719,7 +719,7 @@ so the minimum valid choice is the ceiling of that expression. For three typical
 
 **Deliverable:** Your calculations and a one-sentence response.
 
-**Answer:** Following the mixed FSDP + TP forward-pass model from the Scaling Book, we compare
+**Answer:** Following the mixed FSDP + TP forward-pass model from the Scaling Book, the comparison is between
 
 $$
 T_{\text{math}} = \frac{4 B D F}{N C}
@@ -760,7 +760,7 @@ is also satisfied because $53{,}248 > 10{,}222.22$, so the FSDP communication te
 
 **Deliverable:** A one-paragraph response. Back up your claims with references and/or equations.
 
-**Answer:** Part (c) already assumes an idealized overlap model, so the cleanest ways to reduce the batch size needed for high throughput are the ones that directly improve the communication terms rather than simply "adding more overlap." One option is to increase the effective communication bandwidth, i.e. to improve $M_X$ and $M_Y$ through a better topology / placement so that the collective terms shrink. A second option is to rebalance the hybrid parallelism by changing $X$ and $Y$, so that neither the FSDP nor the TP communication term dominates the other. A third option is to reduce the communication volume itself, for example with lower-precision communication or more communication-efficient collectives, which shifts the compute/communication crossover to a smaller batch. Finally, gradient accumulation is a practical engineering workaround: it does change training dynamics by increasing the effective batch per optimizer step, but it lets us keep the instantaneous microbatch small enough to fit memory while amortizing synchronization overhead across more local work. A longer summary of these tradeoffs is archived in `artifacts/experiments/ch2/2_4_communication_accounting/question_d_summary.md`.
+**Answer:** Part (c) already assumes an idealized overlap model, so the cleanest ways to reduce the batch size needed for high throughput are the ones that directly improve the communication terms rather than simply "adding more overlap." One option is to increase the effective communication bandwidth, i.e. to improve $M_X$ and $M_Y$ through a better topology / placement so that the collective terms shrink. A second option is to rebalance the hybrid parallelism by changing $X$ and $Y$, so that neither the FSDP nor the TP communication term dominates the other. A third option is to reduce the communication volume itself, for example with lower-precision communication or more communication-efficient collectives, which shifts the compute/communication crossover to a smaller batch. Finally, gradient accumulation is a practical engineering workaround: it does change training dynamics by increasing the effective batch per optimizer step, but it allows the instantaneous microbatch to stay small enough to fit memory while amortizing synchronization overhead across more local work. A longer summary of these tradeoffs is archived in `artifacts/experiments/ch2/2_4_communication_accounting/question_d_summary.md`.
 
 ---
 
@@ -785,4 +785,4 @@ is also satisfied because $53{,}248 > 10{,}222.22$, so the FSDP communication te
 
 **Deliverable:** 2-3 sentence summary of any differences, especially those related to memory and communication volume.
 
-**Answer:** Our implementation matches the core idea of ZeRO stage 1 (`P_os`): optimizer states are partitioned across data-parallel ranks, while parameters and gradients remain replicated, so each rank stores only about `1 / N` of the optimizer state. The main difference is that ours is a simplified teaching implementation: it keeps full gradients resident until `step()` and then explicitly broadcasts the updated parameter shards back to all ranks, whereas ZeRO stage 1 is described as part of a broader partition-aware communication schedule designed to keep communication volume close to standard data parallel training. In addition, Rajbhandari et al. analyze mixed-precision Adam, where the optimizer state also includes FP32 master parameters, while our experiments use the course FP32 AdamW implementation, so the exact memory formulas differ even though the source of the savings is the same.
+**Answer:** This implementation matches the core idea of ZeRO stage 1 (`P_os`): optimizer states are partitioned across data-parallel ranks, while parameters and gradients remain replicated, so each rank stores only about `1 / N` of the optimizer state. The main difference is that this version is a simplified teaching implementation: it keeps full gradients resident until `step()` and then explicitly broadcasts the updated parameter shards back to all ranks, whereas ZeRO stage 1 is described as part of a broader partition-aware communication schedule designed to keep communication volume close to standard data parallel training. In addition, Rajbhandari et al. analyze mixed-precision Adam, where the optimizer state also includes FP32 master parameters, while the experiments here use the course FP32 AdamW implementation, so the exact memory formulas differ even though the source of the savings is the same.
