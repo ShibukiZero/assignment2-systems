@@ -449,19 +449,19 @@ Gloo + CPU:
 
 | Processes | 1 MB (ms) | 10 MB (ms) | 100 MB (ms) | 1 GB (ms) |
 | --- | ---: | ---: | ---: | ---: |
-| 2 | 0.442 | 3.942 | 73.296 | 909.977 |
-| 4 | 0.784 | 8.017 | 149.262 | 1272.314 |
-| 6 | 1.120 | 11.554 | 182.700 | 1626.451 |
+| 2 | 2.849 | 16.692 | 170.475 | 1440.573 |
+| 4 | 1.199 | 10.931 | 149.470 | 1483.266 |
+| 6 | 2.130 | 17.344 | 170.018 | 1602.531 |
 
 NCCL + GPU:
 
 | Processes | 1 MB (ms) | 10 MB (ms) | 100 MB (ms) | 1 GB (ms) |
 | --- | ---: | ---: | ---: | ---: |
-| 2 | 0.073 | 0.165 | 0.931 | 8.110 |
-| 4 | 0.196 | 0.280 | 1.280 | 10.972 |
-| 6 | 0.199 | 0.359 | 1.688 | 11.960 |
+| 2 | 0.124 | 0.128 | 0.440 | 3.251 |
+| 4 | 0.128 | 0.133 | 0.554 | 4.560 |
+| 6 | 0.164 | 0.207 | 0.545 | 4.262 |
 
-The dominant trend is that `NCCL + GPU` is consistently much faster than `Gloo + CPU`, and the gap becomes especially large for larger messages. For example, at `1 GB` the mean latency is about `910 ms` vs `8.11 ms` for `2` processes and about `1626 ms` vs `11.96 ms` for `6` processes. In both backends, larger tensors lead to higher latency, and increasing the number of participating processes also tends to increase the runtime, which is consistent with communication cost growing as more data and more workers participate in the collective. Most configurations were also very consistent across ranks; the only noticeably noisy case was `NCCL`, `6` processes, `100 MB`, whose per-rank means remained tightly clustered around `1.69 ms`, suggesting a few slow outlier iterations rather than a systematic synchronization bug.
+The dominant trend is that `NCCL + GPU` is consistently much faster than `Gloo + CPU`, and the gap widens sharply with message size. At `1 GB` the mean all-reduce latency is about `1441 ms` vs `3.25 ms` for `2` processes (a roughly `440x` gap) and about `1603 ms` vs `4.26 ms` for `6` processes (about `375x`); the `Gloo` numbers are dominated by host-side CPU work and PCIe/host-memory bandwidth, while `NCCL` runs the collective over NVLink directly between the H100s. Within each backend, larger tensors lead to higher latency. For `NCCL`, small messages (`1-10 MB`) are latency-bound and nearly flat at `0.1-0.2 ms`, whereas the `1 GB` case is bandwidth-bound at `3-4.5 ms`. Increasing the process count raises `NCCL` latency only modestly (e.g. `1 GB`: `3.25 -> 4.56 -> 4.26 ms` for `2/4/6` processes), which is consistent with the ring all-reduce moving an amount of data per rank that is roughly independent of the world size while incurring more per-step hops. The `Gloo + CPU` small-message numbers are noisy and not cleanly monotonic in the process count (e.g. `1 MB`: `2.85 / 1.20 / 2.13 ms` for `2/4/6`), reflecting per-call launch overhead and CPU scheduling jitter rather than a real bandwidth trend; the large-message `Gloo` numbers, where the data transfer dominates, are well-behaved.
 
 ---
 
