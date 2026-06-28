@@ -12,22 +12,21 @@ Setup:
 - context length: `128`
 - global batch size: `8`
 - precision: `fp32`
-- warmup: `5`
-- measured iterations: `20`
+- warmup: `20`
+- measured iterations: `100`
 
 ## Aggregate Timing
 
 | Metric | Naive individual | Flattened | Overlap individual |
 | --- | ---: | ---: | ---: |
-| Forward + backward | 313.317 ms | 314.240 ms | 322.575 ms |
-| Communication tail | 40.545 ms | 39.197 ms | 6.027 ms |
-| Optimizer step | 92.059 ms | 92.949 ms | 92.055 ms |
-| Total training step | 445.923 ms | 446.389 ms | 420.660 ms |
-| Communication fraction | 9.092% | 8.781% | 1.433% |
+| Forward + backward | 219.553 ms | 224.650 ms | 254.608 ms |
+| Communication tail | 43.112 ms | 47.132 ms | 11.104 ms |
+| Optimizer step | 105.484 ms | 105.437 ms | 105.638 ms |
+| Total training step | 368.152 ms | 377.222 ms | 371.354 ms |
+| Communication fraction | 11.682% | 12.415% | 2.950% |
 
 ## Key Takeaways
 
-- The overlap-individual implementation reduced total step time to `420.660 ms`, compared with `445.923 ms` for the naive baseline and `446.389 ms` for the flattened baseline.
-- Relative to the naive baseline, this is an improvement of about `25.26 ms` (`5.7%`).
-- The measured post-backward communication tail shrank sharply from `40.545 ms` to `6.027 ms`, indicating that most communication was hidden under the backward pass rather than paid entirely at the end of the step.
-- The `forward + backward` segment became slightly longer in the overlap run because communication launch and hook overhead moved into that time window, but the large reduction in the final synchronization tail still produced a clear end-to-end speedup.
+- The overlap-individual implementation reduced the post-backward communication tail dramatically, from about `43.1 ms` to about `11.1 ms` (communication fraction `11.68%` -> `2.95%`), confirming that most gradient communication was successfully hidden under the backward pass.
+- However, the per-parameter asynchronous all-reduce hooks added overhead to the backward pass itself (`forward + backward` grew from about `219.6 ms` to about `254.6 ms`), so the end-to-end step time was roughly unchanged (`368.152 ms` -> `371.354 ms`).
+- On H100 with fast NVLink the communication is already cheap, so the latency hidden by overlap is offset by the hook overhead -- unlike slower-interconnect settings where overlap would yield a clear end-to-end speedup.

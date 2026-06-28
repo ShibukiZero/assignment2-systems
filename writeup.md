@@ -476,19 +476,19 @@ The dominant trend is that `NCCL + GPU` is consistently much faster than `Gloo +
 
 Setup:
 
-The naive DDP training loop was benchmarked in a single-node `2`-GPU configuration using the `XL` language model, `NCCL`, context length `128`, global batch size `8`, and `fp32` precision. Each run used `5` warmup iterations followed by `20` measured iterations, with timing statistics aggregated across both ranks. The archived summary is in `artifacts/experiments/ch2/2_2_naive_ddp/summary.md`, and the raw benchmark payload is in `artifacts/experiments/ch2/2_2_naive_ddp/timer_xl_ctx128_nccl_w2_gbs8_fp32.json`.
+The naive DDP training loop was benchmarked in a single-node `2`-GPU configuration using the `XL` language model, `NCCL`, context length `128`, global batch size `8`, and `fp32` precision. Each run used `20` warmup iterations followed by `100` measured iterations, with timing statistics aggregated across both ranks. The archived summary is in `artifacts/experiments/ch2/2_2_naive_ddp/summary.md`, and the raw benchmark payload is in `artifacts/experiments/ch2/2_2_naive_ddp/timer_xl_ctx128_nccl_w2_gbs8_fp32.json`.
 
 Results:
 
 | Metric | Mean |
 | --- | ---: |
-| Forward + backward | 313.364 ms |
-| Gradient communication | 40.526 ms |
-| Optimizer step | 91.821 ms |
-| Total training step | 445.714 ms |
-| Communication fraction | 9.091% |
+| Forward + backward | 235.239 ms |
+| Gradient communication | 45.578 ms |
+| Optimizer step | 105.564 ms |
+| Total training step | 386.385 ms |
+| Communication fraction | 11.786% |
 
-The naive DDP baseline spends about `40.5 ms` per step in explicit gradient synchronization, which corresponds to roughly `9.1%` of the total training-step time in this setting. Most of the runtime is still local computation: `forward + backward` accounts for about `70.3%` of the step, while `optimizer.step()` contributes about `20.6%`. The two ranks were also closely matched (`445.43 ms` vs `446.00 ms` mean step time), so the benchmark does not show evidence of a rank imbalance or a synchronization bug.
+The naive DDP baseline spends about `45.6 ms` per step in explicit gradient synchronization, which corresponds to roughly `11.8%` of the total training-step time in this setting. Most of the runtime is still local computation: `forward + backward` accounts for about `60.9%` of the step, while `optimizer.step()` contributes about `27.3%`. The two ranks were also closely matched (`386.50 ms` vs `386.27 ms` mean step time), so the benchmark does not show evidence of a rank imbalance or a synchronization bug.
 
 The Nsight Systems trace is also consistent with this timing breakdown: in the measured step, the communication phase appears as a distinct post-backward region rather than overlapping with the backward pass.
 
@@ -507,19 +507,19 @@ The Nsight Systems trace is also consistent with this timing breakdown: in the m
 
 Results:
 
-Both the individual-gradient baseline and the flattened-gradient variant were rerun with the same benchmark script and the same setup: `1` node, `2` GPUs, `XL` model size, context length `128`, global batch size `8`, `fp32`, `5` warmup iterations, and `20` measured iterations. The archived comparison summary is in `artifacts/experiments/ch2/2_3_1_flat_ddp/summary.md`, and the two raw benchmark payloads are in `artifacts/experiments/ch2/2_3_1_flat_ddp/individual_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json` and `artifacts/experiments/ch2/2_3_1_flat_ddp/flat_xl_ctx128_nccl_w2_gbs8_fp32.json`.
+Both the individual-gradient baseline and the flattened-gradient variant were rerun with the same benchmark script and the same setup: `1` node, `2` GPUs, `XL` model size, context length `128`, global batch size `8`, `fp32`, `20` warmup iterations, and `100` measured iterations. The archived comparison summary is in `artifacts/experiments/ch2/2_3_1_flat_ddp/summary.md`, and the two raw benchmark payloads are in `artifacts/experiments/ch2/2_3_1_flat_ddp/individual_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json` and `artifacts/experiments/ch2/2_3_1_flat_ddp/flat_xl_ctx128_nccl_w2_gbs8_fp32.json`.
 
 | Metric | Individual all-reduce | Flattened all-reduce |
 | --- | ---: | ---: |
-| Forward + backward | 313.317 ms | 314.240 ms |
-| Gradient communication | 40.545 ms | 39.197 ms |
-| Optimizer step | 92.059 ms | 92.949 ms |
-| Total training step | 445.923 ms | 446.389 ms |
-| Communication fraction | 9.092% | 8.781% |
+| Forward + backward | 214.478 ms | 211.457 ms |
+| Gradient communication | 41.531 ms | 40.515 ms |
+| Optimizer step | 105.486 ms | 105.376 ms |
+| Total training step | 361.499 ms | 357.351 ms |
+| Communication fraction | 11.489% | 11.342% |
 
 Comparison:
 
-Flattening all gradients into a single communication buffer reduced the measured communication time by about `1.35 ms` (`40.545 -> 39.197 ms`), which lowered the communication fraction from `9.09%` to `8.78%`. However, the end-to-end training-step time was nearly unchanged (`445.923 ms` vs `446.389 ms`), which suggests that this workload is still dominated by local computation rather than communication overhead; in addition, the flattened implementation still performs extra gradient packing and unpacking work, which likely offsets much of the communication-side gain.
+Flattening all gradients into a single communication buffer reduced the measured communication time by about `1.0 ms` (`41.531 -> 40.515 ms`), which lowered the communication fraction from `11.49%` to `11.34%`. However, the end-to-end training-step time was nearly unchanged (`361.50 ms` vs `357.35 ms`), which suggests that this workload is still dominated by local computation rather than communication overhead; in addition, the flattened implementation still performs extra gradient packing and unpacking work, which likely offsets much of the communication-side gain.
 
 The Nsight Systems CUDA HW traces support this interpretation. In the flattened implementation, the NCCL all-reduce region itself is visibly shorter than in the per-parameter baseline, but it is followed by additional memory-copy activity associated with packing and unpacking the flattened gradient buffer. This helps explain why the communication phase becomes cheaper without producing a meaningful end-to-end step-time speedup.
 
@@ -544,19 +544,19 @@ Flattened all-reduce CUDA HW trace:
 
 Results:
 
-The overlap-individual DDP implementation was benchmarked in the same setting as the previous experiments: `1` node, `2` GPUs, `XL` model size, context length `128`, global batch size `8`, `fp32`, `5` warmup iterations, and `20` measured iterations. The archived comparison summary is in `artifacts/experiments/ch2/2_3_2_overlap_individual/summary.md`, and the raw benchmark payloads are in `artifacts/experiments/ch2/2_3_2_overlap_individual/individual_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json`, `artifacts/experiments/ch2/2_3_2_overlap_individual/flat_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json`, and `artifacts/experiments/ch2/2_3_2_overlap_individual/overlap_individual_xl_ctx128_nccl_w2_gbs8_fp32.json`.
+The overlap-individual DDP implementation was benchmarked in the same setting as the previous experiments: `1` node, `2` GPUs, `XL` model size, context length `128`, global batch size `8`, `fp32`, `20` warmup iterations, and `100` measured iterations. The archived comparison summary is in `artifacts/experiments/ch2/2_3_2_overlap_individual/summary.md`, and the raw benchmark payloads are in `artifacts/experiments/ch2/2_3_2_overlap_individual/individual_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json`, `artifacts/experiments/ch2/2_3_2_overlap_individual/flat_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json`, and `artifacts/experiments/ch2/2_3_2_overlap_individual/overlap_individual_xl_ctx128_nccl_w2_gbs8_fp32.json`.
 
 | Metric | Naive individual | Flattened | Overlap individual |
 | --- | ---: | ---: | ---: |
-| Forward + backward | 313.317 ms | 314.240 ms | 322.575 ms |
-| Communication tail | 40.545 ms | 39.197 ms | 6.027 ms |
-| Optimizer step | 92.059 ms | 92.949 ms | 92.055 ms |
-| Total training step | 445.923 ms | 446.389 ms | 420.660 ms |
-| Communication fraction | 9.092% | 8.781% | 1.433% |
+| Forward + backward | 219.553 ms | 224.650 ms | 254.608 ms |
+| Communication tail | 43.112 ms | 47.132 ms | 11.104 ms |
+| Optimizer step | 105.484 ms | 105.437 ms | 105.638 ms |
+| Total training step | 368.152 ms | 377.222 ms | 371.354 ms |
+| Communication fraction | 11.682% | 12.415% | 2.950% |
 
 Comparison:
 
-Overlapping per-parameter gradient communication with backward computation reduced the total training-step time to `420.660 ms`, compared with `445.923 ms` for the naive baseline and `446.389 ms` for the flattened baseline. The post-backward communication tail dropped sharply to `6.027 ms` from about `40 ms` in the earlier baselines, which indicates that most communication was successfully hidden under the backward pass rather than paid entirely at the end of the step.
+Overlapping per-parameter gradient communication with backward computation reduced the post-backward communication tail dramatically, from about `43.1 ms` to about `11.1 ms` (communication fraction `11.68%` -> `2.95%`), confirming that most gradient communication was successfully hidden under the backward pass. However, the per-parameter asynchronous all-reduce hooks added overhead to the backward pass itself (`forward + backward` grew from about `219.6 ms` to about `254.6 ms`), so the end-to-end step time was roughly unchanged (`368.2 ms` -> `371.4 ms`). On H100 with fast NVLink the communication is already cheap, so the latency hidden by overlap is offset by the hook overhead -- unlike slower-interconnect settings where overlap yields a clear end-to-end speedup.
 
 ### (b)
 **Question:** Instrument your benchmarking code (using the 1 node, 2 GPUs, XL model size setup) with the Nsight profiler, comparing between the initial DDP implementation and this DDP implementation that overlaps backward computation and communication. Visually compare the two traces, and provide a profiler screenshot demonstrating that one implementation overlaps compute with communication while the other doesn't.
@@ -588,14 +588,14 @@ Overlapped DDP trace:
 
 | Bucket size (MB) | Time per training iteration (ms) |
 | --- | ---: |
-| 1 | 423.133 |
-| 10 | 422.614 |
-| 100 | 433.551 |
-| 1000 | 429.040 |
+| 1 | 347.945 |
+| 10 | 337.303 |
+| 100 | 352.237 |
+| 1000 | 377.051 |
 
 Commentary:
 
-Bucketed DDP improved over both the naive per-parameter baseline (`445.923 ms`) and the single flattened baseline (`446.389 ms`), but it did not outperform the overlapped per-parameter implementation (`420.660 ms`). The best result came from a medium bucket size of `10 MB`, while both very small and very large buckets performed worse. This partly matches the expected tradeoff: larger buckets reduce the number of collective calls, but they also become ready later and therefore overlap less with the backward pass. In this simple implementation, the reduction in collective-call overhead is not enough to overcome the extra gradient packing and device-copy overhead, so bucketing gives a real improvement over the non-overlapped baselines but only limited benefit beyond overlapped per-parameter DDP.
+The best result is the `10 MB` bucket (`337.3 ms`). The post-backward communication tail grows with bucket size (about `9.45`, `7.13`, `13.99`, and `21.26 ms` for `1`, `10`, `100`, and `1000 MB` respectively), so larger buckets become ready later and overlap less. The `10 MB` bucket (`337.3 ms`) is faster than the naive (`368.2 ms`), flattened (`377.2 ms`), and overlapped (`371.4 ms`) baselines, consistent with bucketing both overlapping communication and reducing collective-call overhead; very small (`1 MB`) and very large (`1000 MB`) buckets are worse, matching the expected tradeoff.
 
 Profiling note:
 
@@ -778,7 +778,7 @@ is also satisfied because $53{,}248 > 10{,}222.22$, so the FSDP communication te
 
 **Deliverable:** 2-3 sentence response with your timings.
 
-**Answer:** Optimizer state sharding leaves the forward-plus-backward portion essentially unchanged in this setup (`355.36 ms` without sharding versus `356.01 ms` with sharding), but it reduces optimizer-step time from `92.31 ms` to `79.14 ms`. As a result, the mean iteration time drops from `447.67 ms` to `435.15 ms`, which is a modest `1.03x` speedup (about `2.8%`). The most likely reason is that each rank now updates and maintains only about half of the Adam state, so the local optimizer step becomes cheaper and the extra post-step parameter broadcasts do not outweigh that savings at `world_size = 2`.
+**Answer:** Optimizer state sharding leaves the forward-plus-backward portion essentially unchanged in this setup (`254.253 ms` without sharding versus `265.566 ms` with sharding), but it reduces optimizer-step time from `105.446 ms` to `86.341 ms`. As a result, the mean iteration time drops from `359.699 ms` to `351.907 ms`, which is a modest `1.02x` speedup (about `2.2%`). The most likely reason is that each rank now updates and maintains only about half of the Adam state, so the local optimizer step becomes cheaper and the extra post-step parameter broadcasts do not outweigh that savings at `world_size = 2`.
 
 ### (c)
 **Question:** How does our approach to optimizer state sharding differ from ZeRO stage 1 (described as ZeRO-DP `P_os` in Rajbhandari et al., 2020)?

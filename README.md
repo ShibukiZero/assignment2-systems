@@ -66,6 +66,7 @@ should be able to unzip your submitted tarball and run
 
 ## Hardware Configuration
 
-- FlashAttention experiments were run on NVIDIA H800 GPUs.
+- Single-GPU benchmarking and FlashAttention experiments were run on a single
+  NVIDIA H100 80GB GPU.
 - Distributed training and communication experiments were run on NVIDIA H20
-  GPUs connected with NVLink.
+  GPUs connected with NVLink (not yet re-run on H100).

@@ -14,8 +14,8 @@ Setup:
 - context length: `128`
 - global batch size: `8`
 - precision: `fp32`
-- timing warmup: `10`
-- timing measured iterations: `50`
+- timing warmup: `20`
+- timing measured iterations: `100`
 
 ## Peak Memory
 
@@ -31,12 +31,12 @@ The measured values are close to the simple formulas in `formula_xl_w2.json` for
 
 | Metric | Full optimizer | Sharded optimizer |
 | --- | ---: | ---: |
-| Forward + backward | `355.36 ms` | `356.01 ms` |
-| Optimizer step | `92.31 ms` | `79.14 ms` |
-| Total step | `447.67 ms` | `435.15 ms` |
+| Forward + backward | `254.253 ms` | `265.566 ms` |
+| Optimizer step | `105.446 ms` | `86.341 ms` |
+| Total step | `359.699 ms` | `351.907 ms` |
 
 Interpretation:
 
 - Optimizer state sharding leaves forward and backward time essentially unchanged in this configuration.
 - The main runtime difference is a cheaper optimizer step, because each rank updates and stores only its local optimizer shard.
-- End-to-end step time improves modestly (`447.67 -> 435.15 ms`, about `2.8%`), while post-step memory drops by roughly `7.5 GiB` per GPU.
+- End-to-end step time improves modestly (`359.699 -> 351.907 ms`, about `2.2%`), while post-step memory drops by roughly `7.5 GiB` per GPU.
