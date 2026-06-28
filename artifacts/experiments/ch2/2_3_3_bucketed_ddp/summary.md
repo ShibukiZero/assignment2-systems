@@ -32,7 +32,7 @@ Comparison to previous baselines:
 
 Interpretation:
 
-The best result is the `10 MB` bucket (`337.3 ms`). The post-backward communication tail grows with bucket size (about `9.45`, `7.13`, `13.99`, and `21.26 ms` for `1`, `10`, `100`, and `1000 MB` respectively), so larger buckets become ready later and overlap less. The `10 MB` bucket is faster than the naive (`368.2 ms`), flattened (`377.2 ms`), and overlapped (`371.4 ms`) baselines, consistent with bucketing both overlapping communication and reducing collective-call overhead; very small (`1 MB`) and very large (`1000 MB`) buckets are worse, matching the expected tradeoff. I would expect the bucketing story to look stronger for a larger or more communication-bound setup, or with a more optimized bucket implementation that avoids most of the pack/unpack overhead.
+The best result is the `10 MB` bucket (`337.3 ms`). The post-backward communication tail grows with bucket size (about `9.45`, `7.13`, `13.99`, and `21.26 ms` for `1`, `10`, `100`, and `1000 MB` respectively), so larger buckets become ready later and overlap less. The `10 MB` bucket is faster than the naive (`368.2 ms`), flattened (`377.2 ms`), and overlapped (`371.4 ms`) baselines, consistent with bucketing both overlapping communication and reducing collective-call overhead; very small (`1 MB`) and very large (`1000 MB`) buckets are worse, matching the expected tradeoff. The bucketing advantage would likely be larger in a more communication-bound setup, or with a more optimized bucket implementation that avoids most of the pack/unpack overhead.
 
 Profiling note:
 

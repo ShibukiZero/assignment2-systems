@@ -1,6 +1,6 @@
 # Section 2.4(c): Compute-Bound Batch Threshold
 
-For the mixed FSDP + TP forward-pass model from the Scaling Book, we use:
+For the mixed FSDP + TP forward-pass model from the Scaling Book, the relevant quantities are:
 
 - `T_math = 4 * B * D * F / (N * C)`
 - `T_FSDP = 4 * D * F / (Y * W_ici * M_X)`

@@ -5,7 +5,7 @@
 
 **Deliverable:** A 1-2 sentence response with your timings.
 
-**Answer:** The table below reports the H100 rerun for the five model sizes from Section 1.1.2 using 5 warmup steps and 10 measured steps at context length 128, batch size 4, vocabulary size 10,000, and FP32 precision. Forward and backward latency both increase with model size, while the standard deviations remain small relative to the means after warmup.
+**Answer:** The table below reports forward and backward latency for the five model sizes from Section 1.1.2 using 5 warmup steps and 10 measured steps at context length 128, batch size 4, vocabulary size 10,000, and FP32 precision. Forward and backward latency both increase with model size, while the standard deviations remain small relative to the means after warmup.
 
 | Model size | Forward mean (ms) | Forward std (ms) | Backward mean (ms) | Backward std (ms) | Total mean (ms) | Total std (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -333,7 +333,7 @@ Specifically, you will report a table that includes latencies for forward, backw
 
 **Deliverable:** A table of results comparing your implementation of FlashAttention-2 with the PyTorch implementation, using the settings above and reporting forward, backward, and end-to-end latencies.
 
-**Answer:** The requested sweep was benchmarked on a single NVIDIA H100 80GB HBM3 with batch size `1`, causal masking enabled, and fixed `q_tile_size = k_tile_size = 16`. The H100 rerun shows that the Triton FlashAttention implementation is faster end-to-end for the successful PyTorch comparisons, and it remains runnable at `seq_len = 65536` where the regular PyTorch implementation runs out of memory for every tested precision and head dimension. The full archived table is in `artifacts/experiments/ch1/1_3_2/summary.md`.
+**Answer:** The requested sweep was benchmarked on a single NVIDIA H100 80GB HBM3 with batch size `1`, causal masking enabled, and fixed `q_tile_size = k_tile_size = 16`. The results show that the Triton FlashAttention implementation is faster end-to-end for the successful PyTorch comparisons, and it remains runnable at `seq_len = 65536` where the regular PyTorch implementation runs out of memory for every tested precision and head dimension. The full archived table is in `artifacts/experiments/ch1/1_3_2/summary.md`.
 
 | Seq | D | Precision | Q tile | K tile | PT status | PT fwd (ms) | PT bwd (ms) | PT e2e (ms) | Flash status | Flash fwd (ms) | Flash bwd (ms) | Flash e2e (ms) | E2E speedup |
 | ---: | ---: | --- | ---: | ---: | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |
@@ -507,7 +507,7 @@ The Nsight Systems trace is also consistent with this timing breakdown: in the m
 
 Results:
 
-Both the individual-gradient baseline and the flattened-gradient variant were rerun with the same benchmark script and the same setup: `1` node, `2` GPUs, `XL` model size, context length `128`, global batch size `8`, `fp32`, `20` warmup iterations, and `100` measured iterations. The archived comparison summary is in `artifacts/experiments/ch2/2_3_1_flat_ddp/summary.md`, and the two raw benchmark payloads are in `artifacts/experiments/ch2/2_3_1_flat_ddp/individual_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json` and `artifacts/experiments/ch2/2_3_1_flat_ddp/flat_xl_ctx128_nccl_w2_gbs8_fp32.json`.
+Both the individual-gradient baseline and the flattened-gradient variant were benchmarked with the same script and the same setup: `1` node, `2` GPUs, `XL` model size, context length `128`, global batch size `8`, `fp32`, `20` warmup iterations, and `100` measured iterations. The archived comparison summary is in `artifacts/experiments/ch2/2_3_1_flat_ddp/summary.md`, and the two raw benchmark payloads are in `artifacts/experiments/ch2/2_3_1_flat_ddp/individual_baseline_xl_ctx128_nccl_w2_gbs8_fp32.json` and `artifacts/experiments/ch2/2_3_1_flat_ddp/flat_xl_ctx128_nccl_w2_gbs8_fp32.json`.
 
 | Metric | Individual all-reduce | Flattened all-reduce |
 | --- | ---: | ---: |
