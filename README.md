@@ -68,5 +68,7 @@ should be able to unzip your submitted tarball and run
 
 - Single-GPU benchmarking and FlashAttention experiments were run on a single
   NVIDIA H100 80GB GPU.
-- Distributed training and communication experiments were run on NVIDIA H20
-  GPUs connected with NVLink (not yet re-run on H100).
+- Distributed training and communication experiments were run on NVIDIA H100
+  80GB SXM GPUs connected with NVLink: the DDP and optimizer-state-sharding
+  experiments used 2 GPUs, and the single-node all-reduce communication
+  benchmark (§2.1.1) used up to 6 GPUs.
